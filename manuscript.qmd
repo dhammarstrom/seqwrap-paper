@@ -1,0 +1,160 @@
+---
+title: "seqwrap: an R package for flexible iterative fitting of high dimensional data"
+abstract: |
+  high-dimensional data... 
+  *Background*: High-dimensional data is becoming...
+  *Results*: 
+  *Conclusions*: seqwrap enables the user to perform iterative fitting of 
+author:
+  - name: Chidimma Phoebe Echebiri
+    email: chidimma.echebiri@inn.no
+    affiliation:
+      - name: University of Inland Norway
+        department: Department of Biotechnology, PhD programme in applied ecology and biotechnology
+  - name: Rafi Ahmad
+    email: rafi.ahmad@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Biotechnology
+  - name: Stian Ellefsen
+    email: stian.ellefsen@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+  - name: Daniel Hammarström
+    email: daniel.hammarstrom@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+    attributes:
+      corresponding: true
+format: typst
+csl: resources/bmc-bioinformatics.csl
+bibliography: resources/bibliography.bib
+editor_options: 
+  chunk_output_type: console
+---
+
+<!-- From guidelines: Please note: editable files are required for processing in production. If your manuscript contains any non-editable files (such as PDFs) you will be required to re-submit an editable file when you submit your revised manuscript, or after editorial acceptance in case no revision is necessary. --> 
+
+
+<!-- The abstract should not exceed 350 words -->
+
+
+**Keywords:** High-dimensional data, RNA-sequencing, ... <!-- Three to ten keywords -->
+
+## Background
+
+<!-- Outline -->
+
+High-dimensional data, such as those derived from high-throughput nucleotide sequencing platforms or mass spectrometry systems, are becoming increasingly commonplace in many research settings in medicine and biology, either as the primary outcome of investigations or as supporting evidence for other primary outcomes. To accommodate statistical analysis of such data, many specialized software packages have been developed. These packages are typically designed to handle data with specific distributional assumptions using a limited set of modelling formulations. For example, high-dimensional gene expression data derived from microarrays is commonly analyzed using limma [@ritchie_limma_2015], which employs a Gaussian model. However, when gene expression data are derived from next-generation sequencing platforms, gene counts are analyzed using models that assume a negative binomial distribution in packages such as DESeq2 [@anders_differential_2010; @love_moderated_2014] and edgeR [@robinson_edger_2010]. Although limma, DESeq2, and edgeR all incorporate information from the whole data set in the estimation of differential expression through shrinkage of dispersion or mean parameters [@ritchie_limma_2015, @love_moderated_2014,@robinson_edger_2010], modelling is done on a gene-by-gene basis. However, these packages are limited in their ability to analyze data from more complex designs, including data with hierarchical structure.
+
+To address this limitation, multiple additional software packages have been developed, specifically designed for repeated measures data [@vestal_lmerseq_2022; @hoffman_dream_2021; @nguyen_rmrnaseq_2020; @lewis_glmmseq_2022; @bian_pairedfb_2019; @van_de_wiel_shrinkbayes_2014; @vestal_mcmseq_2020]. Notably, Vestal et al. use a linear mixed-effects model framework to analyze transformed count RNA-seq data, assuming normally distributed errors [@vestal_lmerseq_2022], while Lewis et al. use a negative binomial generalized linear mixed-effects model to directly model counts, both in hierarchical data, such as repeated-measures designs. Interestingly, both tools mentioned above were built using established modeling packages in the R ecosystem, lme4 [@bates_fitting_2015], nlme [@pinheiro2000], and glmmTMB [@brooks_glmmtmb_nodate], to iteratively model gene expression data on a gene-by-gene basis. Although pre-specified modeling decisions simplify the user experience, they may also limit necessary flexibility. Conversely, the R ecosystem offers a collection of packages for building regression models that account for hierarchical data (e.g., lme4, glmmTMB, lmerTest) [@brooks_glmmtmb_nodate; @kuznetsova_lmertest_2017; @bates_fitting_2015]. Additionally, several R packages are devoted to post-fitting diagnostics and analysis of such models (emmeans [@lenth_emmeans_2025], performance [@ludecke_performance_2021], marginaleffects [@arel-bundock_how_2024]). Together, these packages provide a rich functionality for flexible model building, including evaluation and diagnostics. However, there is a lack of tools to combine the use of these established packages in complex, high-dimensional data scenarios.
+
+Here, we present seqwrap, an R package that provides a flexible, high-level wrapper for the iterative modeling of high-dimensional data using established R-based modeling frameworks, such as nlme, lme4, and glmmTMB. It simplifies the process of specifying, fitting, and evaluating both simple and complex models across multiple iterations. By leveraging recent developments in glmmTMB, we also show that information sharing across targets in a high-dimensional data set is possible using priors based on the distribution of parameter values from non-informed models in a two-step workflow. Together, this makes seqwrap a convenient tool for creating flexible, principled workflows for high-dimensional omics data.
+
+## Implementation
+
+### Features of the seqwrap R package
+
+seqwrap is built entirely in R and designed for iterative modelling of high-dimensional data such as those derived from quantification of genes, proteins, or other omics-type data, using established R-based modelling packages such as lme4, nlme, and glmmTMB. Compared to similar packages like glmmseq and lmerseq[@lewis_glmmseq_2022, @vestal_lmerseq_2022], seqwrap is designed to enable the user to select a suitable model function (e.g., `lmer` or `glmmTMB`) and specify options to allow for analysis using different distributional assumptions and any combination of fixed and random effects available in the user's modelling framework of choice to allow for hierarchical data structures. Additionally, seqwrap enables users to create functions for post-fitting diagnostics and analysis.
+
+The package implements three core functions: `seqwrap_compose`, `seqwrap`, and `seqwrap_summarise` (Figure 1). `seqwrap_compose` lets the user specify the required data sets (the outcome data, metadata, and target-wise data), a selected modeling algorithm together with its arguments, and optional user-specified functions for model summaries and evaluations. `seqwrap_compose` performs pre-model validation of the input to detect potential issues before iterative model fitting. If the input data is a single data frame with each row representing a target and each column representing a sample the target specific data will be represented by the letter `y` when specifying the model formula in the arguments (e.g., `formula: y ~ 1`). Data can also be supplied to `seqwrap_compose` as a named list of data frames. In this case, target specific variables will be represented by their name and be available for specifying a formula used by the modeling algorithm. The metadata should contain all design variables used for specifying the formula together with a variable containing the names of samples in the data. During iterative model fitting, the metadata will be combined with the target-specific row(s) of the data and made available for the modelling algorithm.
+
+While the metadata remains the same across all iterations, `targetdata` provides an additional data set where target-specific values can be supplied to each model. Such values could be fixed parameter values, such as dispersion values for negative binomial models estimated from preliminary models, or priors for regularizing parameters in models that allow for *maximum a posteriori* estimates (see below for an example). If the user do not write custom summary or evaluations functions, the default summary and evaluation functions will provide tabular summaries of all parameter estimates (summary function) and, if available for the selected modeling algorithm, model convergence diagnostics (evaluation function). The user can specify custom summary and evaluation function and call them in `seqwrap_compose`. A custom summary or evaluation function should take a model object as its only argument, and return a data frame. A custom summary function could be used to specify a specific contrast or predictions and a specific evaluation function could provide metrics for model performance. In the arguments, `seqwrap_compose` expects a list of arguments for the selected modeling function, including the model formula. In the simplest case, this is the only requirement, however, most modeling functions also require additional arguments, specifying e.g., a distributional model in generalized linear models.
+
+Once populated with data, a modeling function, and arguments, the resulting object (a `swobject`) can be supplied to `seqwrap` for iterative gene-by-gene modelling. `seqwrap` iterates over all targets (rows in data), or a user-specified subset of targets. A subset of targets can be helpful when prototyping the model. While prototyping the model using a subset of targets, the user can also choose to save model objects for developing and testing summary or evaluation functions, or debugging the model. We do not recommend saving full model objects during full-scale iterative modeling as this is very memory-intensive. `seqwrap` enables parallel processing via the `pbapply` package. The user can specify the number of cores to use for this functionality. Once initialized, `seqwrap` will provide a timing estimate and progress tracking.
+
+After iterating over the data set, `seqwrap` displays a compact summary of any errors, warnings, and messages returned by the selected modeling algorithm, along with those returned from the default or user-specified summary and evaluation functions. All errors, warnings, and messages are stored in a tabular format in the result object available for inspection. The resulting object also contains all model outputs created by the evaluation and summary functions. Models that fail to produce output are removed from the model summaries. The `seqwrap_summarise` function collects all summaries in two data frames for further downstream analysis. If user-defined functions are used for model summaries and evaluations, their output are stored in two lists which are combined into two data frames using `seqwrap_summarise`.
+
+### Case study
+
+#### Data
+
+Pillon et al. [-@pillon2022] investigated gene expression profiles in individuals with type 2 diabetes and healthy control individuals in response to a standardized exercise session. RNA was extracted from muscle biopsy samples obtained before, immediately after, and after a 3-hour recovery (two groups, three time-points). Paired-end RNA-sequencing was performed, and the data were submitted to the Gene Expression Omnibus (GSE202295). Here we have downloaded the available raw counts matrix data, which has been processed into counts from raw reads by NCBI. Raw read counts where filtered to retain target genes with at least 10 counts in 70% of samples in each combination of group and time-point.
+
+Using the data from Pillon et al. [-@pillon2022], we are interested in baseline differences in gene expression profiles between individuals with type 2 diabetes and healthy controls. Additionally, we want to determine differences in responses to the exercise session. Since the data have been collected using a repeated-measures design, in which samples are obtained from the same individuals at three time points, we could use a mixed-effects model to directly obtain estimates of the baseline differences and the differences between groups in changes from baseline, while controlling for correlations among samples due to the repeated design using a varying intercept per participant (random intercept). Using a negative binomial (NB2) distribution for count data, we construct a preliminary model for gene-specific (*g*) expression levels where each observation (*i*) corresponds to a particular participant (*j*) at a specific time point, with a random intercept accounting (*b~0~*) for participant-level correlation and a observation level size factor (*s~i~*) corresponding to the normalized library size (trimmed mean of M values [@robinson2010]) divided by the median normalized library size:
+
+$$
+\begin{align}
+Y_{g[i,j]} &\sim \operatorname{NB}2(\mu_{g[i,j]}, \theta_g) \\
+\operatorname{log}(\mu_{g[i,j]}) &= \eta_{g[i,j]} \\
+\eta_{g[i,j]} &= \beta_{0g} + \beta_{1g} \text{group}_{\text{diabetes}} + \beta_{2g} \text{time}_{t2} + \beta_{3g} \text{time}_{t3} +\\ 
+&\quad \beta_{4g} ( \text{time}_{t2}\times\text{group}_{\text{diabetes}}) + \\
+&\quad \beta_{5g} ( \text{time}_{t3}\times\text{group}_{\text{diabetes}}) + \\
+&\quad \operatorname{log}(\text{s}_i) + b_{0[j]} \\
+b_{0[j]} &\sim \operatorname{Normal}(0, \sigma_g)
+\end{align}
+$$ {#eq-model-1}
+
+Our model uses the parameterization $\operatorname{Var}(Y) = \mu + \frac{\mu^2}{\theta}$ so that $\theta$ represents the inverse dispersion (as implemented in the glmmTMB package as `nbinom2`).   
+
+
+### Simulation study
+
+To evaluate the performance of different models, we used the distribution of estimates from the preliminary model (@eq-model-1, @fig-m1-estimates) to simulate 10 data sets, each with 10000. Simulated parameter values were used to construct the expected values of a negative binomial distribution. Two parameters (&beta;~1~ and &beta;~5~) were simulated with two sets of genes (1250 genes each) that were given non-null effects. These effects were drawn from a uniform distribution with a minimum of 0.1 and a maximum of 1. For the &beta;~1~ parameter, the effect was given a positive and a negative sign with equal probability, while the parameter &beta;~5~ was simulated with positive signs with 75% probability to match the characteristics of the observed data [-@pillon2022]. We used the estimated mean-dispersion relationship to simulate dispersion parameter values from a normal distribution centered on the trend, with an SD equal to the residual standard error of a local polynomial regression model (@fig-m1-estimates).  
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Distribution of estimated parameter values (density curves; A) from Model 1 describing gene expression levels (counts) in gene-wise negative binomial models and parameter values used to simulate counts (bars; A). The mean-dispersion relationship was described using a local polynomial regression (LOESS) with the inverse of the estimated standard error was used to provide weights to the estimated curve (orange line; B). A subset of estimates are shown with size of points showing relative weight in the model. A smaller point has large a large standard error for the dispersion parameter, indicated with error bras. The estimated dispersion parameter is the inverse dispersion indicating higher overdispersion at lower estimates. The residual standard error from the LOESS model was used to simulate dispersion parameters (gray field in B)."
+#| fig-width: 6.69
+#| fig-height: 4.72
+#| out-width: "170mm"
+#| out-height: "120mm"
+#| label: fig-m1-estimates
+
+source("figures/figure-1.R")
+
+figure1
+
+```
+
+
+
+
+To evaluate the performance of different models we used the distribution of estimates from the preliminary model (@eq-model-1) to simulate 10 data sets with  
+
+
+<!-- I suggest we start with the very simple case of our simulated data to just show the workflow -->
+
+To further demonstrate Seqwrap's usage using lme4, glmmTMB and nlme, we simulated a simple study with a test-control design among 10 participants
+
+
+
+## Discussion
+
+-   seqwrap allows for different models and estimator algorithms for high-dimensional data
+-   For simple models, flexibility comes to the price of efficiency, but flexibility is important in more complex problems
+-   The choice of models and transformations affects inference, systematic evaluation of available choices can help us learn more from the data. This relates to the comparisons made between NB-models and those implemented in e.g., lmerseq
+-   Shrinkage is a way to share information across genes, using seqwrap, shrinkage can be introduced through multiple mechanisms. Multi-step models may be used to build custom shrunken estimates
+-   Specialized software implementation exists for specific high-dimensional data (e.g. gene counts or protein expression). Relying on well established modelling frameworks can increase transparency in assumptions and limitations.
+
+## Conclusions
+
+seqwrap provieds an interface allowing for iterative modelling of high dimensional data.
+
+## Availability and requirements
+
+Project name: seqwrap Project home page: github.com/trainome/seqwrap Operating system(s): Platform independent Programming language: R Other requirements: R 4.4.0 or higher License: MIT license
+
+## List of Abbreviations
+
+## Declarations
+
+#### Ethics approval and consent to participate
+
+#### Consent for publication
+
+#### Availability of data and materials
+
+#### Competing interests
+
+#### Funding
+
+#### Authors' contributions
+
+#### Acknowledgements
+
+#### Authors' information (optional)

@@ -1,0 +1,228 @@
+---
+title: "Shetty et al. (2024) Re-analysis"
+format: html
+editor: visual
+execute: 
+  echo: false
+editor_options: 
+  chunk_output_type: console
+---
+
+## TODO
+
+- Find missing samples
+- Re-do analysis using formal mixed-effects model 
+
+
+
+```{r}
+# Load the packages
+library(seqwrap)
+library(dplyr)
+library(tidyverse)
+library(lme4)
+library(seqwraphelper)
+library(glmmTMB)
+library(nlme)
+```
+
+First extract the alcohol study data in seqwraphelper. Link to raw data <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE232408>
+
+Link to publication <https://pmc.ncbi.nlm.nih.gov/articles/PMC11087488/#>*ad93*
+
+```{r}
+
+
+# gene level data 
+gene_data <- seqwraphelper::shetty_gene
+
+
+
+metadata <- seqwraphelper::shetty_metadata |> 
+  # drop the tissue colume
+  dplyr::select(-tissue, -Run) |> 
+  mutate(sex = factor(sex, levels =c("Male", "Female")),
+         dose = factor(dose, levels = c("Placebo", "MediumDose", "HighDose")),
+         period = factor(period, levels = c("1", "2","3")),
+         time = factor(time, levels = c("0", "3")),
+         study_site = factor(study_site, levels = c("1", "2")))
+
+
+## Extract and combine sequence data 
+sequence_data <- metadata |> 
+  mutate(sequence = paste(period, dose, sep = "_")) |> 
+  
+  distinct(sequence, participant, period) |> 
+  
+  summarise(.by = participant, 
+            sequence = paste(sequence, collapse = "-"))
+
+
+## Extract carryover 
+metadata2 <- metadata |> 
+  
+  inner_join(sequence_data) |> 
+  # Add carryover
+  arrange(participant, period) |> 
+  mutate(.by = participant, 
+         carryover = lag(dose), 
+         carryover = if_else(is.na(carryover), "First", carryover)) |> 
+  # Fix time and period to factor variables 
+  mutate(period = paste0("p", period), 
+         time = paste0("t", time), 
+         dose = factor(dose, levels = c("Placebo", "MediumDose", "HighDose")))
+           
+  
+
+## Check if samples are in meta data 
+# In case order of sample Ids do not match, reorder to match
+all(colnames(gene_data)[-1] %in% metadata$seq_sample_id)
+
+
+# Check if everything matches except the gene_id
+all(match(colnames(gene_data[,-1]), metadata2$seq_sample_id))
+```
+
+As our primary interest lies in the relationship between alcohol dosage and gene expression, we want to control for the order of treatments, or any carryover effects between treatments, with the (average) interaction between `time` and `dose` as the main focus for our model. In Shetty et al. [-@shetty_peripheral_2024], participants were used as the clustering variable for random-effects intercepts while dose, time and sequence were used as fixed effects. An alternative formulation could include a factor indicating the previous treatment to model carryover effects. 
+
+
+
+```{r}
+
+# Filter away low-expression genes
+cpm_values <- t(t(gene_data[, -1] ) / colSums(gene_data[, -1] )) * 1e6
+keep <- rowSums(cpm_values > 1) >= 50
+
+gene_filtered <- gene_data[keep, ]
+
+temp <- slice_sample(gene_filtered, n = 100) |> 
+  bind_rows(filter(gene_filtered, gene_id == "ENSG00000180537"))
+
+
+m1 <- seqwrap_compose(data = temp, 
+                metadata = metadata2, 
+                modelfun = glmmTMB::glmmTMB, 
+                samplename = "seq_sample_id",
+                arguments = list(formula = y ~ sex + period + dose*time + (1|participant), 
+                                 family = glmmTMB::nbinom1()))
+
+
+m2 <- seqwrap_compose(data = temp, 
+                metadata = metadata2, 
+                modelfun = glmmTMB::glmmTMB, 
+                samplename = "seq_sample_id",
+                arguments = list(formula = y ~ sex + carryover + dose*time + (1|participant), 
+                                 family = glmmTMB::nbinom1()))
+
+
+
+
+
+
+
+
+m1_results <- seqwrap(m1, 
+                      return_models = TRUE)
+
+m2_results <- seqwrap(m2, 
+                      return_models = TRUE)
+
+
+
+
+
+summary(m1_results@models[[1]])
+summary(m2_results@models[[2]])
+
+
+m1_sum <- seqwrap_summarise(m1_results)
+m2_sum <- seqwrap_summarise(m2_results)
+
+m1_sum$summaries |> 
+  filter(target == "RNF182") |> 
+  print(n = 22)
+
+m2_sum$summaries |> 
+  filter(target == "ENSG00000180537") |> 
+  print(n = 22)
+
+
+
+```
+
+
+
+
+
+
+
+
+Analysing the data using GlmmTmb . Here, we analyse the gene counts using a negative binomial mixed-effects model . We include dose, time ,sex and the interaction between dose and time as fixed effects. For random effects, we allow each participant to have its own baseline and time trend but assume no systematic relationship between the two. We also include study site as a source of random variation.
+
+Allowing correlation between time and participant (1+ time \| participant) caused convergence issues a significant number of genes
+
+```{r}
+
+# initialise arguments using the algorithms syntax
+args <- list(formula = y ~ dose*time + sex +  period + (1+ time || participant) + (1|study_site) ,
+             family = glmmTMB::nbinom1)
+
+
+glmm_container <- seqwrap_compose(data = gene_data,
+                             metadata = metadata,
+                             samplename = "seq_sample_id",
+                             modelfun = glmmTMB::glmmTMB ,
+                             arguments = args,
+                          #   summary_fun = sumfun,
+                          #  eval_fun = evalfun
+                            )
+
+glmm_model <- seqwrap(glmm_container,
+                 #summary_fun = sumfun,
+                 #eval_fun = evalfun,
+                 return_models = F,
+                # subset = 1:19,
+                 cores = 8)
+
+saveRDS(glmm_model, "data/seqwrap_glmm_model.RDS")
+
+glmm_model_summary <- seqwrap_summarise(glmm_model)
+
+
+glmm_model_summary$summaries
+
+
+glmm_model_summary$evaluations
+
+seqwrapResults(glmm_model_summary$summaries)
+```
+
+Building a model using lme4
+
+```{r}
+
+
+lmer_container <- seqwrap_compose(
+  data = gene_data,
+  metadata = metadata,
+  samplename = "seq_sample_id",
+  modelfun = lme4::glmer,
+  arguments = list(formula = y ~ dose*time + sex +  period + (1+ time || participant) + (1|study_site),
+  family = poisson),
+)
+
+lmer_model <- seqwrap(
+  lmer_container,
+  return_models = F,
+  #subset = 1:15,
+  cores = 2
+)
+lmer_model_summary <- seqwrap_summarise(lmer_model)
+
+saveRDS(lmer_model, "data/seqwrap_lmer_model.RDS")
+
+lmer_model_summary$summaries
+
+
+lmer_model_summary$evaluations
+```
