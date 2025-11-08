@@ -33,12 +33,12 @@ for(i in 1:10) {
                          dataset = i)
 
 
-  if (!dir.exists("data_sim/simdata2/raw")) dir.create("data_sim/simdata2/raw/")
-  if (!dir.exists("data_sim/simdata2/clean")) dir.create("data_sim/simdata2/raw/")
-  if (!dir.exists("data_sim/simdata2/popeffect")) dir.create("data_sim/simdata2/raw/")
+  if (!dir.exists("data_sim/simdata2/raw")) dir.create("data_sim/simdata2/raw/", recursive = TRUE)
+  if (!dir.exists("data_sim/simdata2/clean")) dir.create("data_sim/simdata2/clean/", recursive = TRUE)
+  if (!dir.exists("data_sim/simdata2/popeffect")) dir.create("data_sim/simdata2/popeffect/", recursive = TRUE)
 
-  if (!dir.exists("data_sim/estimates2")) dir.create("data_sim/estimates2")
-  if (!dir.exists("data_sim/evaluations2")) dir.create("data_sim/evaluations2")
+  if (!dir.exists("data_sim/estimates2")) dir.create("data_sim/estimates2", recursive = TRUE)
+  if (!dir.exists("data_sim/evaluations2")) dir.create("data_sim/evaluations2", recursive = TRUE)
 
 
 
@@ -109,6 +109,7 @@ for(i in 1:10) {
   saveRDS(m4_m5_results$evaluations_m4, file = paste0("data_sim/evaluations2/m4_evaluations_", i, ".RDS"))
   saveRDS(m4_m5_results$evaluations_m5, file = paste0("data_sim/evaluations2/m5_evaluations_", i, ".RDS"))
 
+  print(paste0("Simulation 2:", i, " is done."))
 
 }
 

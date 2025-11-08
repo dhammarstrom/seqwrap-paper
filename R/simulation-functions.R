@@ -293,9 +293,10 @@ m1_m2_sim <- function(combined_data, dataset, dofit = TRUE,
         ms1,
         return_models = FALSE,
         # subset = 1:1100,
+        verbose = FALSE,
         cores = CORES)
 
-      ms1_sum <- seqwrap_summarise(ms1_results)
+      ms1_sum <- seqwrap_summarise(ms1_results, verbose = FALSE)
 
       evaluations[[k1]] <- ms1_sum$evaluations |>
         mutate(model = "m1",
@@ -496,12 +497,12 @@ m1_m2_sim <- function(combined_data, dataset, dofit = TRUE,
 
     ms2_results <- seqwrap(
       ms2,
-      return_models = FALSE,
+      return_models = FALSE, verbose = FALSE,
       #  subset = 1:50,
       cores = CORES)
 
 
-    ms2_sum <- seqwrap_summarise(ms2_results)
+    ms2_sum <- seqwrap_summarise(ms2_results, verbose = FALSE)
 
 
     evaluations2[[k1]] <- ms2_sum$evaluations |>
@@ -573,13 +574,13 @@ m3_sim <- function(combined_data, dataset, dofit = TRUE, CORES = 2) {
     if (dofit) {
       ms3_results <- seqwrap(
         ms3,
-        return_models = FALSE,
+        return_models = FALSE, verbose = FALSE,
         #   subset = 1:50,
         cores = CORES)
 
 
 
-      ms3_sum <- seqwrap_summarise(ms3_results)
+      ms3_sum <- seqwrap_summarise(ms3_results, verbose = FALSE)
 
       evaluations[[k3]] <- ms3_sum$evaluations |>
         mutate(model = "m3",
@@ -636,11 +637,11 @@ m4_m5_sim <- function(combined_data, dataset, dofit = TRUE,
     if (dofit) {
       ms1_results <- seqwrap(
         ms1,
-        return_models = FALSE,
+        return_models = FALSE, verbose = FALSE,
         # subset = 1:1100,
         cores = CORES)
 
-      ms1_sum <- seqwrap_summarise(ms1_results)
+      ms1_sum <- seqwrap_summarise(ms1_results, verbose = FALSE)
 
       evaluations[[k1]] <- ms1_sum$evaluations |>
         mutate(model = "m4",
@@ -767,12 +768,12 @@ m4_m5_sim <- function(combined_data, dataset, dofit = TRUE,
 
     ms2_results <- seqwrap(
       ms2,
-      return_models = FALSE,
+      return_models = FALSE, verbose = FALSE,
       #  subset = 1:50,
       cores = CORES)
 
 
-    ms2_sum <- seqwrap_summarise(ms2_results)
+    ms2_sum <- seqwrap_summarise(ms2_results, verbose = FALSE)
 
 
     evaluations2[[k1]] <- ms2_sum$evaluations |>
