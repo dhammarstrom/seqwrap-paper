@@ -3466,6 +3466,22 @@ Sarcopenia is a progressive and generalised skeletal muscle disorder involving t
 	author = {Brooks, Mollie and Kristensen, Kasper and van Benjamin, Koen and Magnusson, Ani and Berg, Casper and Nielsen, Anders and Skaug, Hans and Maechler, Martin and Bolker, Benjamin},
 }
 
+@misc{brooks2017a,
+  title = {{{glmmTMB}}: {{Generalized Linear Mixed Models}} Using {{Template Model Builder}}},
+  shorttitle = {{{glmmTMB}}},
+  author = {Brooks, Mollie and Bolker, Ben and Kristensen, Kasper and Maechler, Martin and Magnusson, Arni and Skaug, Hans and Nielsen, Anders and Berg, Casper and Van Bentham, Koen},
+  year = 2017,
+  month = feb,
+  pages = {1.1.13},
+  publisher = {Comprehensive R Archive Network},
+  doi = {10.32614/CRAN.package.glmmTMB},
+  urldate = {2025-11-14},
+  abstract = {Fit linear and generalized linear mixed models with various extensions, including zero-inflation. The models are fitted using maximum likelihood estimation via 'TMB' (Template Model Builder). Random effects are assumed to be Gaussian on the scale of the linear predictor and are integrated out using the Laplace approximation. Gradients are calculated using automatic differentiation.},
+  langid = {english}
+}
+
+
+
 @article{kuznetsova_lmertest_2017,
 	title = {{lmerTest} Package: Tests in Linear Mixed Effects Models},
 	volume = {82},
@@ -3597,5 +3613,73 @@ Sarcopenia is a progressive and generalised skeletal muscle disorder involving t
   abstract = {Identifying differentially expressed (DE) genes between different conditions is one of the main goals of RNA-seq data analysis. Although a large amount of RNA-seq data were produced for two-group comparison with small sample sizes at early stage, more and more RNA-seq data are being produced in the setting of complex experimental designs such as split-plot designs and repeated measure designs. Data arising from such experiments are traditionally analyzed by mixed-effects models. Therefore an appropriate statistical approach for analyzing RNA-seq data from such designs should be generalized linear mixed models (GLMM) or similar approaches that allow for random effects. However, common practices for analyzing such data in literature either treat random effects as fixed or completely ignore the experimental design and focus on two-group comparison using partial data. In this paper, we examine the effect of ignoring the random effects when analyzing RNA-seq data. We accomplish this goal by comparing the standard GLMM model to the methods that ignore the random effects through simulation studies and real data analysis. Our studies show that, ignoring random effects in a multi-factor experiment can lead to the increase of the false positives among the top selected genes or lower power when the nominal FDR level is controlled.},
   keywords = {Biometry,Gene Expression Profiling/statistics & numerical data,High-Throughput Nucleotide Sequencing/methods/*statistics & numerical data,Linear Models,Models Statistical,Sequence Analysis RNA/methods/*statistics & numerical data},
   file = {C:\Users\706194\Zotero\storage\MAQCV6TQ\Cui-2016-What if we ignore the random effects.pdf}
+}
+
+@article{sun2017,
+  title = {Differential Expression Analysis for {{RNAseq}} Using {{Poisson}} Mixed Models},
+  author = {Sun, Shiquan and Hood, Michelle and Scott, Laura and Peng, Qinke and Mukherjee, Sayan and Tung, Jenny and Zhou, Xiang},
+  year = 2017,
+  month = jun,
+  journal = {Nucleic Acids Research},
+  volume = {45},
+  number = {11},
+  pages = {e106},
+  issn = {1362-4962},
+  doi = {10.1093/nar/gkx204},
+  abstract = {Identifying differentially expressed (DE) genes from RNA sequencing (RNAseq) studies is among the most common analyses in genomics. However, RNAseq DE analysis presents several statistical and computational challenges, including over-dispersed read counts and, in some settings, sample non-independence. Previous count-based methods rely on simple hierarchical Poisson models (e.g. negative binomial) to model independent over-dispersion, but do not account for sample non-independence due to relatedness, population structure and/or hidden confounders. Here, we present a Poisson mixed model with two random effects terms that account for both independent over-dispersion and sample non-independence. We also develop a scalable sampling-based inference algorithm using a latent variable representation of the Poisson distribution. With simulations, we show that our method properly controls for type I error and is generally more powerful than other widely used approaches, except in small samples (n {$<$}15) with other unfavorable properties (e.g. small effect sizes). We also apply our method to three real datasets that contain related individuals, population stratification or hidden confounders. Our results show that our method increases power in all three data compared to other approaches, though the power gain is smallest in the smallest sample (n = 6). Our method is implemented in MACAU, freely available at www.xzlab.org/software.html.},
+  langid = {english},
+  pmcid = {PMC5499851},
+  pmid = {28369632},
+  keywords = {Algorithms,Bayes Theorem,Computer Simulation,Gene Expression Profiling,Humans,Linear Models,Markov Chains,Models Genetic,Monte Carlo Method,Poisson Distribution,Sequence Analysis RNA,Software},
+  file = {C:\Users\706194\Zotero\storage\EB35I4AT\Sun et al. - 2017 - Differential expression analysis for RNAseq using Poisson mixed models.pdf}
+}
+
+@article{harrison2014,
+  title = {Using Observation-Level Random Effects to Model Overdispersion in Count Data in Ecology and Evolution},
+  author = {Harrison, Xavier A.},
+  year = 2014,
+  journal = {PeerJ},
+  volume = {2},
+  pages = {e616},
+  issn = {2167-8359},
+  doi = {10.7717/peerj.616},
+  abstract = {Overdispersion is common in models of count data in ecology and evolutionary biology, and can occur due to missing covariates, non-independent (aggregated) data, or an excess frequency of zeroes (zero-inflation). Accounting for overdispersion in such models is vital, as failing to do so can lead to biased parameter estimates, and false conclusions regarding hypotheses of interest. Observation-level random effects (OLRE), where each data point receives a unique level of a random effect that models the extra-Poisson variation present in the data, are commonly employed to cope with overdispersion in count data. However studies investigating the efficacy of observation-level random effects as a means to deal with overdispersion are scarce. Here I use simulations to show that in cases where overdispersion is caused by random extra-Poisson noise, or aggregation in the count data, observation-level random effects yield more accurate parameter estimates compared to when overdispersion is simply ignored. Conversely, OLRE fail to reduce bias in zero-inflated data, and in some cases increase bias at high levels of overdispersion. There was a positive relationship between the magnitude of overdispersion and the degree of bias in parameter estimates. Critically, the simulations reveal that failing to account for overdispersion in mixed models can erroneously inflate measures of explained variance (r (2)), which may lead to researchers overestimating the predictive power of variables of interest. This work suggests use of observation-level random effects provides a simple and robust means to account for overdispersion in count data, but also that their ability to minimise bias is not uniform across all types of overdispersion and must be applied judiciously.},
+  langid = {english},
+  pmcid = {PMC4194460},
+  pmid = {25320683},
+  keywords = {Explained variance,Generalized linear mixed models,Observation-level random effect,Poisson-lognormal models,Quasi-Poisson,r-squared},
+  file = {C:\Users\706194\Zotero\storage\5CGWWPQV\Harrison - 2014 - Using observation-level random effects to model overdispersion in count data in ecology and evolutio.pdf}
+}
+
+@article{mccarthy2012,
+  title = {Differential Expression Analysis of Multifactor {{RNA-Seq}} Experiments with Respect to Biological Variation},
+  author = {McCarthy, Davis J. and Chen, Yunshun and Smyth, Gordon K.},
+  year = 2012,
+  journal = {Nucleic Acids Research},
+  volume = {40},
+  number = {10},
+  pages = {4288--4297},
+  issn = {0305-1048},
+  doi = {10.1093/nar/gks042},
+  urldate = {2020-05-16},
+  abstract = {A flexible statistical framework is developed for the analysis of read counts from RNA-Seq gene expression studies. It provides the ability to analyse complex experiments involving multiple treatment conditions and blocking variables while still taking full account of biological variation. Biological variation between RNA samples is estimated separately from the technical variation associated with sequencing technologies. Novel empirical Bayes methods allow each gene to have its own specific variability, even when there are relatively few biological replicates from which to estimate such variability. The pipeline is implemented in the edgeR package of the Bioconductor project. A case study analysis of carcinoma data demonstrates the ability of generalized linear model methods (GLMs) to detect differential expression in a paired design, and even to detect tumour-specific expression changes. The case study demonstrates the need to allow for gene-specific variability, rather than assuming a common dispersion across genes or a fixed relationship between abundance and variability. Genewise dispersions de-prioritize genes with inconsistent results and allow the main analysis to focus on changes that are consistent between biological replicates. Parallel computational approaches are developed to make non-linear model fitting faster and more reliable, making the application of GLMs to genomic data more convenient and practical. Simulations demonstrate the ability of adjusted profile likelihood estimators to return accurate estimators of biological variability in complex situations. When variation is gene-specific, empirical Bayes estimators provide an advantageous compromise between the extremes of assuming common dispersion or separate genewise dispersion. The methods developed here can also be applied to count data arising from DNA-Seq applications, including ChIP-Seq for epigenetic marks and DNA methylation analyses.},
+  file = {C:\Users\706194\Zotero\storage\X4KPN6KM\McCarthy-2012-Differential expression analysis.pdf}
+}
+
+@article{zyla2019,
+  title = {Gene Set Enrichment for Reproducible Science: Comparison of {{CERNO}} and Eight Other Algorithms},
+  author = {Zyla, J. and Marczyk, M. and Domaszewska, T. and Kaufmann, S. H. E. and Polanska, J. and Weiner, J.},
+  year = 2019,
+  month = dec,
+  journal = {Bioinformatics},
+  edition = {2019/06/06},
+  volume = {35},
+  number = {24},
+  pages = {5146--5154},
+  issn = {1367-4803 (Print) 1367-4803},
+  doi = {10.1093/bioinformatics/btz447},
+  abstract = {MOTIVATION: Analysis of gene set (GS) enrichment is an essential part of functional omics studies. Here, we complement the established evaluation metrics of GS enrichment algorithms with a novel approach to assess the practical reproducibility of scientific results obtained from GS enrichment tests when applied to related data from different studies. RESULTS: We evaluated eight established and one novel algorithm for reproducibility, sensitivity, prioritization, false positive rate and computational time. In addition to eight established algorithms, we also included Coincident Extreme Ranks in Numerical Observations (CERNO), a flexible and fast algorithm based on modified Fisher P-value integration. Using real-world datasets, we demonstrate that CERNO is robust to ranking metrics, as well as sample and GS size. CERNO had the highest reproducibility while remaining sensitive, specific and fast. In the overall ranking Pathway Analysis with Down-weighting of Overlapping Genes, CERNO and over-representation analysis performed best, while CERNO and GeneSetTest scored high in terms of reproducibility. AVAILABILITY AND IMPLEMENTATION: tmod package implementing the CERNO algorithm is available from CRAN (cran.r-project.org/web/packages/tmod/index.html) and an online implementation can be found at http://tmod.online/. The datasets analyzed in this study are widely available in the KEGGdzPathwaysGEO, KEGGandMetacoreDzPathwaysGEO R package and GEO repository. SUPPLEMENTARY INFORMATION: Supplementary data are available at Bioinformatics online.},
+  langid = {english},
+  file = {C:\Users\706194\Zotero\storage\3B98Q5D3\Zyla-2019-Gene set enrichment for reproducible.pdf}
 }
 

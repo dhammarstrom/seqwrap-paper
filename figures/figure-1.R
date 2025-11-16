@@ -10,7 +10,7 @@ source("figures/figure-opts.R")
 
 # Read the data from the preliminary model
 m1_results <- readRDS("data/m1_results.RDS")
-m1_sum <- seqwrap_summarise(m1_results)
+m1_sum <- seqwrap_summarise(m1_results, verbose = FALSE)
 
 # Fit a trend to the dispersion data from m1
 # save the data in a convenient format.
@@ -24,6 +24,12 @@ trend_model_observed <- loess(dispersion ~ log_mu,
                               data = dispersion_dat,
                               span = 0.7,
                               weights = 1/(dispersion.se^2))
+# Low variability scenario
+trend_model_observed_low <- loess(dispersion ~ log_mu,
+                              data = dispersion_dat,
+                              span = 0.7)
+
+
 
 # Plot the dispersion fit, including examples of sampling
 # weights (SE of dispersion estimates)
@@ -40,7 +46,8 @@ disp_pred_data <- data.frame(log_mu = seq(from = 0.5, to = 10, by = 0.1),
                                    log_mu = seq(from = 0.5,
                                                 to = 10,
                                                 by = 0.1))),
-                  sd = trend_model_observed$s)
+                  sd = trend_model_observed$s,
+                  sd.low = trend_model_observed_low$s)
 
 
 
@@ -49,7 +56,7 @@ p1 <- dispersion_dat |>
   ggplot(aes(log_mu, dispersion)) +
 
   geom_point(alpha = 0.2,
-             color = colors[4]) +
+             color = colors[5]) +
 
 
   geom_ribbon(data = disp_pred_data,
@@ -59,33 +66,55 @@ p1 <- dispersion_dat |>
                   ymax = pred + sd),
               alpha = 0.1) +
 
+  geom_ribbon(data = disp_pred_data,
+              aes(x = log_mu,
+                  y = pred,
+                  ymin = pred - sd.low,
+                  ymax = pred + sd.low),
+              alpha = 0.3) +
+
+
+
   geom_line(data = disp_pred_data,
             aes(log_mu, pred),
-            color = colors[1],
+            color = colors[2],
+
             linewidth = 1.2) +
   # Add subset with se
-  geom_errorbar(data = dispersion_subset,
-                aes(log_mu, dispersion,
-                    ymin = dispersion - dispersion.se,
-                    ymax = dispersion + dispersion.se),
-                width = 0.2) +
-
-   geom_point(data = dispersion_subset,
-             aes(log_mu, dispersion, size = 1/dispersion.se^2),
-             color = "black",
-             fill = colors[5],
-             shape = 21) +
+ # geom_errorbar(data = dispersion_subset,
+ #               aes(log_mu, dispersion,
+ #                   ymin = dispersion - dispersion.se,
+ #                   ymax = dispersion + dispersion.se),
+ #               width = 0.2) +
+#
+  # Removing example data from weights calculation
+ #  geom_point(data = dispersion_subset,
+ #            aes(log_mu, dispersion, size = 1/dispersion.se^2),
+ #            color = "black",
+ #            fill = colors[5],
+ #            shape = 21) +
 
   theme_classic() +
 
   labs(x = "log(&mu;)",
-       y = "log(&theta;)") +
+       y = expression(paste("log(", theta,")"))) +
+
+  annotate("text",
+           x = c(10.1, 10.1),
+           y = c(3, 6.5),
+           hjust = 0,
+           lineheight = 0.75,
+           label = c("Low variability\nscenario",
+                     "High variability\nscenario"),
+
+           size = 2.5) +
 
   theme(axis.title.x = element_markdown(),
-        axis.title.y = element_markdown(angle = 0),
+        axis.title.y = element_text(),
+
         legend.position = "none")
 
-
+p1
 # Add simulated parameters
 
 # Set the number of truly different genes
@@ -172,16 +201,17 @@ p2 <- m1_sum$summaries |>
 
 
   ggplot(aes(estimate)) +
-  geom_density( color = colors[5]) +
+
   facet_wrap(~ Term, scales = "free", ncol = 2) +
 
   geom_histogram(data = sim_param,
                  aes(estimate, y = after_stat(density)),
-                 alpha = 0.2,
+                 alpha = 0.8,
                  boundary = 0,
-                 fill = colors[1],
+                 fill = colors[2],
                  closed = "left") +
 
+  geom_density( color = colors[5]) +
 
   theme_classic() +
   labs(x = "Parameter estimate") +
@@ -196,6 +226,7 @@ p2 <- m1_sum$summaries |>
 
 p2
 
+# Save figure components ##################################################
 
 figure1 <- plot_grid(plot_grid(NULL, p2,NULL,
                     ncol = 3, rel_widths = c(0.1, 1, 0)),
@@ -207,6 +238,9 @@ figure1 <- plot_grid(plot_grid(NULL, p2,NULL,
   annotate("text", x = c(0.02,0.6),
            y = c(0.98, 0.89), label = c("A","B"))
 
+
+
+saveRDS(figure1, "figures/figure-1.RDS")
 
 
 ggsave("figures/figure-1.pdf",
