@@ -1,4 +1,19 @@
 
+# Functions used in simulations and analysis #########################
+#
+#
+#
+# 01. filter_fun Filtering expression of simulated genes to remove
+# "low expression" genes.
+# 02. simulate_datasets A wrapper function to simplify simulation of datasets
+# 03. sigma_summary A summary function for seqwrap - used in NB models
+# 04. lmer_summary Summary function for seqwrap for lmer-based models (is singular)
+# 05. poisson_summary Summary function for Poisson models
+# 06. simulation functions - Wrapper functions for specific models used in
+# loop over all data sets
+# 07. extract_simulations Extract simulations from dataset-specific files.
+
+# 01. filter_fun ##############################################################
 # A function for filter by expression, some genes will have low expression
 # due to sampling variability, these are removed in this function.
 #
@@ -41,6 +56,8 @@ filter_fun <- function(counts, metadata) {
 
 }
 
+
+# 02. simulate_datasets ########################################################
 # A (wrapper) function for simulating data sets
 #
 # nullgenes, the number of genes with null effects
@@ -199,10 +216,7 @@ simulate_datasets <- function(nullgenes = 7500,
 
 
 
-
-
-
-
+# 03. sigma_summary ###########################################################
 # A summary function to return the dispersion parameter with SE on the log scale
 # mean(predict(x, type = "link)) will give us the predicted log counts.
 # We will put this in the eval fun to also get estimates of the parameters in
@@ -225,6 +239,8 @@ sigma_summary <- function(x) {
 
 }
 
+
+# 04. lmer_summary ############################################################
 # A summary function for the lmer model of transformed counts
 # it will return a the singularity diagnostics from lme4.
 lmer_summary <- function(x) {
@@ -235,6 +251,7 @@ lmer_summary <- function(x) {
 
 }
 
+# 05. poisson_summary #########################################################
 # A summary function for the Poisson models. This will use the convergence
 # diagnostic in glmmTMB to indicate convergence. The pdHess indicator from the
 # Hessian matrices
@@ -255,7 +272,7 @@ poisson_summary <- function(x) {
 }
 
 
-
+# 06. simulation functions ####################################################
 # Model 1 and 2 simulation function
 #
 #
@@ -799,5 +816,71 @@ m4_m5_sim <- function(combined_data, dataset, dofit = TRUE,
 
 
 }
+
+
+# 07. extract_simulations #####################################################
+
+extract_simulations <- function(evaluations_path = "data_sim/evaluations",
+                                estimates_path = "data_sim/estimates",
+                                populationeffects_path = "data_sim/simdata/popeffect",
+                                disp_scenario = "s1") {
+
+  # Evaluations
+
+  # The evaluations can be combined despite having different shape. Non-
+  # available columns will be NA.
+
+  eval_files <- list.files(evaluations_path)
+  evaluations <- list()
+  for(i in seq_along(eval_files)) {
+
+    evaluations[[i]] <- readRDS(paste0(evaluations_path, "/",
+                                       eval_files[i])) |>
+      mutate(file = eval_files[i],
+             disp_scenario = disp_scenario)
+
+  }
+
+  evaluations <- bind_rows(evaluations)
+
+
+
+
+  # Estimates
+  est_files <- list.files(estimates_path)
+  estimates <- list()
+  for(i in seq_along(est_files)) {
+
+    estimates[[i]] <- readRDS(paste0(estimates_path, "/",
+                                     est_files[i])) |>
+      mutate(file = est_files[i],
+             disp_scenario = disp_scenario)
+
+  }
+
+  estimates <- bind_rows(estimates)
+
+  # Population effects
+  pop_files <- list.files(populationeffects_path)
+  popeffects <- list()
+  for(i in seq_along(pop_files)) {
+
+    popeffects[[i]] <- readRDS(paste0(populationeffects_path, "/",
+                                      pop_files[i])) |>
+      mutate(file = pop_files[i],
+             disp_scenario = disp_scenario)
+
+  }
+
+  popeffects <- bind_rows(popeffects)
+
+  return(list(populationeffects = popeffects,
+              estimates = estimates,
+              evaluations = evaluations))
+
+}
+
+
+
 
 

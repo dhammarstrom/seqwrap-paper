@@ -1,0 +1,617 @@
+---
+title: "seqwrap: an R package for flexible iterative fitting ofhigh dimensional data"
+subtitle: "Supplementary material"
+author:
+  - name: Chidimma Phoebe Echebiri
+    affiliation:
+      - name: University of Inland Norway
+        department: Department of Biotechnology, PhD programme in applied ecology and biotechnology
+  - name: Rafi Ahmad
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Biotechnology
+  - name: Stian Ellefsen
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+  - name: Daniel Hammarström
+    email: daniel.hammarstrom@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+    attributes:
+      corresponding: true
+format:
+  typst:
+    toc: true
+csl: resources/bmc-bioinformatics.csl
+---
+
+## Fitting models with `seqwrap`
+
+### Using target data for prior information in `glmmTMB` 
+
+
+## Comparing `glmmSeq`, `lmerSeq` and `seqwrap`
+
+Here, a basic comparison is made between lmerseq [@vestal2022] and Seqwrap using the [@pillon2022] gene expression data
+
+### Data extraction/preprocessing
+
+Here the Pillion gene expression data is downloaded and transformed using VST as required by lmerseq
+
+```{r}
+#| label: libraries and data preprocessing
+#| code-fold: true
+#| echo: false
+library(lmerSeq)
+library(DESeq2)
+library(edgeR)
+library(seqwraphelper)
+library(dplyr)
+library(tidyverse)
+library(seqwrap)
+library(purrr)
+library(glmmSeq)
+library(ggplot2)
+
+# download the data from seqwraphelper
+dat <- seqwraphelper::geo_data(gse = "GSE202295")
+
+
+
+
+# Filter low expressed gened and combine after filtering
+keep <- filterByExpr(
+  dat$countdata[,-1],
+  min.count = 10,
+  min.total.count = 15,
+  large.n = 10,
+  min.prop = 0.7,
+  group = paste(dat$metadata$group, dat$metadata$time))
+
+countdat <-  dat$countdata[keep,]
+
+
+
+metadat <- dat$metadata
+
+
+
+# Check if sequence_ID matches. If False, make to match 
+all(colnames(countdat)[-1] == metadat$seq_sample_id)
+
+
+
+# Normalize the count data using DESeq2's VST
+dds <- DESeqDataSetFromMatrix(countData = countdat[,-1],
+                              colData = metadat,
+                              design = ~ time * group)
+
+dds <- DESeq(dds)
+vsd.fixed <- varianceStabilizingTransformation(dds, blind=F)
+vst_expr <- assay(vsd.fixed)
+
+
+
+
+
+# Add as gene_ids to the variance_stabilised_counts
+rownames(vst_expr) <- countdat$geneid
+
+# subset to only the first fifteen genes
+vst_expr <- vst_expr[1:15,]
+```
+
+Lmerseq has a lmerseq.fit() function that builds the model. Lmerseq by default uses 2 cores. This will be set in the other packages too
+
+```{r}
+#| label: lmerseq
+#| code-fold: true
+#| echo: false
+
+# fit the model using lmerseq
+fit.lmerSeq <- lmerSeq.fit(form = ~ time * group  + (1|id),
+                           expr_mat = vst_expr,
+                           sample_data = metadat,
+                           REML = T)
+
+
+
+
+coefs <- c("timepost", "timerec", "groupT2D", "timepost:groupT2D", "timerec:groupT2D")
+
+
+lmerseq_summary <- coefs %>%
+  map_df(~ lmerSeq.summary(
+    lmerSeq_results = fit.lmerSeq,
+    coefficient = .x,
+    p_adj_method = "BH",
+    ddf = "Satterthwaite",
+    sort_results = FALSE
+  )$summary_table %>%
+    mutate(Coefficient = .x)
+  )
+
+
+saveRDS(lmerseq_summary, "data/lmerseq_model_summary.RDS")
+```
+
+### Seqwrap
+
+Building same model with seqwrap
+
+```{r}
+#| label: Seqwrap
+#| code-fold: true
+#| echo: false
+
+# make data suitable for seqwrap as it accepts only dataframes or lists
+vst_expr_df <- data.frame(vst_expr) %>%
+  tibble::rownames_to_column(var = "target")
+
+
+# first validate input using seqwrap compose
+seqwrap_val <- seqwrap_compose(
+  data = vst_expr_df,
+  metadata = metadat,
+  samplename = "seq_sample_id",
+  modelfun = lmerTest:::lmer,
+  arguments = list(
+    formula = y ~ time * group  + (1|id))
+)
+
+
+  seqwrap_model <- seqwrap(seqwrap_val,
+                        return_models = FALSE,
+                        cores = 2)
+
+seqwrap_summary_df <- seqwrap_summarise(seqwrap_model)$summaries
+
+
+saveRDS(seqwrap_summary_df, "data/seqwrap_model_summary.RDS")
+```
+
+### Visualisation
+
+The estimates and pvalues of both models are to be visualised
+
+```{r}
+#| label: Visualisation
+#| code-fold: true
+#| echo: false
+
+
+# Select
+seqwrap_df <- seqwrap_summary_df %>%
+  subset(!term %in% c("(Intercept)", "sd__(Intercept)", "sd__Observation")) %>%
+  dplyr::select("target",  "estimate", "p.value", "term" ) %>%
+  mutate(source = "Seqwrap")
+
+
+lmerseq_df <- lmerseq_summary %>%
+  dplyr::select(gene, Estimate, p_val_raw, Coefficient) %>%
+  mutate(source = "lmerseq") %>%
+  #rename to match the columns from seqwrap summary
+  rename(target = gene,
+         estimate = Estimate,
+         p.value = p_val_raw,
+         term = Coefficient)
+
+
+merged <- merge(seqwrap_df, lmerseq_df, by = c("target", "term"), suffixes = c("_seqwrap", "_lmerseq"))
+
+ggplot(merged, aes(x = estimate_seqwrap, y = estimate_lmerseq, color = target)) +
+   geom_point(size = 2) +
+   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+   facet_wrap(~ term)
+   labs(title = "Comparison of Estimates", x = "seqwrap Estimate", y = "lmerseq Estimate") +
+   theme_minimal()
+
+
+
+
+
+   
+   
+   ggplot(merged, aes(x = p.value_seqwrap, y = p.value_lmerseq, color = target)) +
+     geom_point(size = 2) +
+     geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+     facet_wrap(~ term)
+   labs(title = "Comparison of p values", x = "seqwrap p values", y = "lmerseq pvalues") +
+     theme_minimal()
+
+
+```
+
+
+
+## Simulation results
+
+```{r}
+#| label: fig-genecounts-simulated
+#| fig-cap: "Number of simulated gene targets (true negative and true positives) across dispersion scenarios and sample sizes."
+
+library(tidyverse)
+library(cowplot)
+library(ggtext)
+source("figures/figure-opts.R")
+
+## Load data from simulations
+source("R/simulation-functions.R")
+
+
+# Extract simulations sorts out all simulations files and combines them.
+# This is simulations with dispersion scenario 1.
+sim_results <- extract_simulations(evaluations_path = "data_sim/evaluations",
+                                   estimates_path = "data_sim/estimates",
+                                   populationeffects_path = "data_sim/simdata/popeffect",
+                                   disp_scenario = "s1")
+
+
+sim_results2 <- extract_simulations(evaluations_path = "data_sim/evaluations2",
+                                   estimates_path = "data_sim/estimates2",
+                                   populationeffects_path = "data_sim/simdata2/popeffect",
+                                   disp_scenario = "s2")
+
+
+# Number of genes in each simulated data set
+
+
+bind_rows(sim_results$populationeffects, 
+          sim_results2$populationeffects) |> 
+  # Filter to keep only 1 term
+  filter(term == "conditionB") |> 
+  mutate(effect = if_else(population_effect == 0, "true.negative", "true.positive")) |> 
+  summarise(.by = c(dataset, size, disp_scenario, effect),
+            n = n()) |>
+  
+  mutate(size = factor(size, levels = c("small", "medium", "large"), 
+                       labels = c("Small (m = 54, n = 18)", 
+                                  "Medium (m = 108, n = 36)", 
+                                  "Large (m = 216, n = 72)")), 
+         disp_scenario = factor(disp_scenario, 
+                                levels = c("s1", "s2"), 
+                                labels = c("High dispersion\nvariability", 
+                                           "Low dispersion\nvariability")), 
+         effect = factor(effect, levels = c("true.negative", "true.positive"), 
+                         labels = c("True negative", "True positive"))) |> 
+  
+  ggplot(aes(size, n, fill = disp_scenario)) + 
+  geom_point(position = position_jitter(width = 0.05), 
+             size = 3, 
+             shape = 21,
+             alpha = 0.5) +
+  labs(x = "Sample size (m samples, n participants)", 
+       y = "Gene targets", 
+       fill = "Dissersion scenario")  +
+  theme_classic() + 
+  
+  
+  
+  scale_fill_manual(values = c(colors[c(1,5)])) +
+  theme(legend.position = "bottom", 
+        legend.title = element_blank(), 
+        strip.background = element_blank(), 
+        strip.text = element_text(hjust = 0)) + 
+  facet_wrap(~ effect, scales = "free", ncol = 1)
+```
+
+
+
+
+
+
+```{r}
+
+# Number of genes per data set with true population effect
+true_effects <- bind_rows(sim_results$populationeffects, 
+          sim_results2$populationeffects) |> 
+  mutate(effect = if_else(population_effect == 0, "true.negative", "true.positive")) |> 
+  summarise(.by = c(term, dataset, size, disp_scenario, effect), 
+            n = n()) 
+
+# Savining for manuscript
+saveRDS(true_effects, "data-out/true_effects.RDS")
+
+
+
+
+# Combine all true/false effects
+est_temp <- bind_rows(sim_results$estimates, 
+          sim_results2$estimates) |> 
+  # Retain only terms of interest.
+  filter(term %in% c("conditionB", "timet3:conditionB")) |>
+  # dataset was mis-named in the simulations.
+  rename(dataset = datasets) |>
+  select(- file)
+
+
+est <- est_temp |> 
+  inner_join(
+    bind_rows(sim_results$populationeffects, 
+              sim_results2$populationeffects) |>
+               mutate(target = as.character(target)) |>
+               select(-file)) |>
+
+  select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
+
+  mutate(.by = c(model, term, size, dataset, disp_scenario),
+         fdr = p.adjust(p.value, method = "fdr")) |>
+  mutate(true_effect = if_else(population_effect == 0, "neg", "pos"),
+         identified_effect = if_else(fdr > 0.05, "neg", "pos"),
+         true_positive = if_else(true_effect == "pos" &
+                                   identified_effect == "pos", TRUE, FALSE),
+         false_positive = if_else(true_effect == "neg" &
+                                    identified_effect == "pos", TRUE, FALSE)) 
+
+
+```
+
+
+
+```{r}
+#| 
+
+
+
+# 
+convergence_stats <- bind_rows(sim_results$evaluations, 
+          sim_results2$evaluations) |> 
+  select(-file) |> 
+  mutate(conv = if_else(model == "m3" & isSingular == TRUE, FALSE, 
+                        if_else(model != "m3" & convergence != 0, FALSE, TRUE)), 
+         conv.nonstrict = if_else(model != "m3" & convergence != 0, FALSE, TRUE)) |> 
+  rename(dataset = datasets) |> 
+  select(target, size, model, dataset, disp_scenario, isSingular, conv, conv.nonstrict) |> 
+
+  inner_join(
+    bind_rows(sim_results$populationeffects, 
+              sim_results2$populationeffects) |>
+               mutate(target = as.character(target)) |>
+               select(-file) |> 
+      mutate(effect = if_else(population_effect == 0, "n", "p")) |> 
+      select(target, term, dataset, size, disp_scenario, effect) |> 
+      pivot_wider(names_from = term, values_from = effect) |> 
+      mutate(effect = paste0(conditionB, ":", `timet3:conditionB`)) |> 
+      mutate(.by = c(dataset, size, effect, disp_scenario), 
+             ntotal = n()) |> 
+      select(-conditionB, - `timet3:conditionB`) 
+  )  |> 
+  
+  summarise(.by = c(model, dataset, disp_scenario, effect, size), 
+            conv = sum(conv),
+            conv.nonstrict = sum(conv.nonstrict),
+            ntotal = mean(ntotal)) 
+  
+  
+
+
+  
+saveRDS(convergence_stats, "data-out/covergence_stats.RDS" )
+
+
+```
+
+
+```{r}
+#| label: fig-convergence
+#| fig-cap: "Number of models that provided estimates as a percentage of all potential targets. In (A), a strict criteria was used for convergence for the Gaussian model of transformed counts where models with singular fits where excluded as suggested by Vestal et al. (2022). In (B) all converged models are included."
+
+
+
+p1 <- convergence_stats |> 
+
+  mutate(success = 100 *  (conv / ntotal), 
+         size = factor(size, levels = c("small", "medium", "large"), 
+                       labels = c("Small (m = 54, n = 18)", 
+                                  "Medium (m = 108, n = 36)", 
+                                  "Large (m = 216, n = 72)")), 
+         disp_scenario = factor(disp_scenario, 
+                                levels = c("s1", "s2"), 
+                                labels = c("High dispersion\nvariability", 
+                                           "Low dispersion\nvariability")), 
+         model = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"), 
+                        labels = c("Negative binomial", 
+                                   "Regularized Negative binomial", 
+                                   "Gaussian transformed counts", 
+                                   "Poisson OLRE", 
+                                   "Regularized Poisson OLRE"))) |> 
+  ggplot(aes(model, success, color = model)) +
+  geom_point(position = position_jitter(width = 0.1)) + 
+  facet_grid(disp_scenario ~ size) +
+  
+  labs(y = "Converged/non-singular models (%)", 
+       x = "Model") +
+  
+  theme_classic() + 
+  theme(panel.background = element_rect(fill = "gray95"), 
+        strip.background = element_blank(), 
+        strip.text.y = element_text(angle = 0), 
+        strip.text.x = element_text(hjust = 0), 
+        legend.title = element_blank(), 
+        axis.text.x = element_blank()) + 
+  scale_color_manual(values = colors)
+  
+  
+  
+p2 <-  convergence_stats |> 
+
+  mutate(success = 100 *  (conv.nonstrict / ntotal), 
+         size = factor(size, levels = c("small", "medium", "large"), 
+                       labels = c("Small (m = 54, n = 18)", 
+                                  "Medium (m = 108, n = 36)", 
+                                  "Large (m = 216, n = 72)")), 
+         disp_scenario = factor(disp_scenario, 
+                                levels = c("s1", "s2"), 
+                                labels = c("High dispersion\nvariability", 
+                                           "Low dispersion\nvariability")), 
+         model = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"), 
+                        labels = c("Negative binomial", 
+                                   "Regularized Negative binomial", 
+                                   "Gaussian transformed counts", 
+                                   "Poisson OLRE", 
+                                   "Regularized Poisson OLRE"))) |> 
+  ggplot(aes(model, success, color = model)) +
+  geom_point(position = position_jitter(width = 0.1)) + 
+  facet_grid(disp_scenario ~ size) +
+  
+  labs(y = "Converged models (%)", 
+       x = "Model") +
+  
+  theme_classic() + 
+  theme(panel.background = element_rect(fill = "gray95"), 
+        strip.background = element_blank(), 
+        strip.text.y = element_text(angle = 0), 
+        strip.text.x = element_text(hjust = 0), 
+        legend.title = element_blank(), 
+        axis.text.x = element_blank(), 
+        legend.position = "none")  + 
+  scale_color_manual(values = colors)
+  
+plot_grid(p1, 
+          plot_grid(p2, NULL, rel_widths = c(1, 0.32)), 
+          ncol = 1)
+
+```
+
+
+
+
+
+```{r}
+
+
+# P-value distributions for null genes
+
+est |>
+  filter(population_effect == 0) |>
+  
+  mutate(model_coef = factor(paste0(model,"_", term), 
+                             levels = c("m1_conditionB", 
+                                        "m2_conditionB", 
+                                        "m3_conditionB", 
+                                        "m4_conditionB", 
+                                        "m5_conditionB",
+                                        "m1_timet3:conditionB", 
+                                        "m2_timet3:conditionB",
+                                        "m3_timet3:conditionB",
+                                        "m4_timet3:conditionB",
+                                        "m5_timet3:conditionB"
+                                        ), 
+                             labels = c("Model 1\nMain", 
+                                        "Model 2\nMain",
+                                        "Model 3\nMain",
+                                        "Model 4\nMain",
+                                        "Model 5\nMain",
+                                        "Model 1\nInteraction",
+                                        "Model 2\nInteraction",
+                                        "Model 3\nInteraction",
+                                        "Model 4\nInteraction",
+                                        "Model 5\nInteraction"
+                                        )), 
+         size_disp = factor(paste0(size,"_", disp_scenario), 
+                            levels = c("small_s1", "medium_s1", "large_s1", 
+                                       "small_s2", "medium_s2", "large_s2"), 
+                            labels = c("Small\nHigh dispersion", 
+                                       "Medium\nHigh dispersion", 
+                                       "Large\nHigh dispersion", 
+                                       "Small\nLow dispersion", 
+                                       "Medium\nLow dispersion", 
+                                       "Large\nLow dispersion"
+                                       ))) |> 
+  
+  ggplot(aes(p.value)) +
+  geom_histogram(color="black", fill="grey40", binwidth = 0.025,
+                 boundary = 0, closed = "left") +
+  scale_x_continuous(breaks = c(0.05, 0.5, 1)) +
+  facet_grid(model_coef ~ size_disp) + 
+  theme_classic() + 
+  labs(x = "Un-adjusted P-value", 
+       y = "")
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+
+
+## Create averages
+
+```
+
+
+
+
+```{r}
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+
+
+est |>
+
+  filter(population_effect != 0) |>
+
+  mutate(.by = c(model, size, term, dataset, disp_scenario),
+         rank_true = rank(population_effect),
+         rank_obs = rank(estimate)) |>
+
+  summarise(.by = c(model, size, term, dataset, disp_scenario),
+            cor = cor(rank_true, rank_obs)) |>
+
+  mutate(size = factor(size, levels = c("small", "medium", "large"))) |>
+  ggplot(aes(size, cor, group = paste(model,dataset),
+             color = model)) +
+  geom_line() +
+  facet_grid(term ~ disp_scenario)
+
+
+
+```
+
+
+
+```{r}
+
+est |>
+
+  filter(population_effect != 0) |>
+  filter(dataset == 2, size == "medium") |>
+
+  mutate(.by = c(model, term, dataset, disp_scenario),
+         rank_true = rank(population_effect),
+         rank_obs = rank(estimate)) |>
+
+  ggplot(aes(rank_true, rank_obs)) +
+  geom_point(alpha = 0.3) +
+  facet_grid(paste(model) ~ paste(term, disp_scenario))
+
+
+
+
+```
+
+
+
+

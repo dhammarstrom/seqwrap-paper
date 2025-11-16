@@ -50,9 +50,11 @@ rsconnect/
 
 # Do not track big ome data (added by trainomeMetaData)
 /ome-data/
-# Do not track simulation results
+# Do not track simulation results or other large files
 data_sim/
 data-raw/
+data-out/
+data/
 
 # Do not track PDFs
 *.pdf
