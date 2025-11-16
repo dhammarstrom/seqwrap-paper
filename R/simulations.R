@@ -32,12 +32,12 @@ for(i in 1:10) {
                           dispersion_model = trend_model_observed,
                          dataset = i)
 
-  if (!dir.exists("data_sim/simdata/raw")) dir.create("data_sim/simdata/raw/")
-  if (!dir.exists("data_sim/simdata/clean")) dir.create("data_sim/simdata/raw/")
-  if (!dir.exists("data_sim/simdata/popeffect")) dir.create("data_sim/simdata/raw/")
+  if (!dir.exists("data_sim/simdata/raw/")) dir.create("data_sim/simdata/raw/", recursive = TRUE)
+  if (!dir.exists("data_sim/simdata/clean/")) dir.create("data_sim/simdata/clean/", recursive = TRUE)
+  if (!dir.exists("data_sim/simdata/popeffect/")) dir.create("data_sim/simdata/popeffect/", recursive = TRUE)
 
-  if (!dir.exists("data_sim/estimates")) dir.create("data_sim/estimates")
-  if (!dir.exists("data_sim/evaluations")) dir.create("data_sim/evaluations")
+  if (!dir.exists("data_sim/estimates")) dir.create("data_sim/estimates", recursive = TRUE)
+  if (!dir.exists("data_sim/evaluations")) dir.create("data_sim/evaluations", recursive = TRUE)
 
   # Save simulated data for later
   saveRDS(d$simdat, file = paste0("data_sim/simdata/raw/dataset_",i,".RDS"))
@@ -106,6 +106,6 @@ for(i in 1:10) {
   saveRDS(m4_m5_results$evaluations_m4, file = paste0("data_sim/evaluations/m4_evaluations_", i, ".RDS"))
   saveRDS(m4_m5_results$evaluations_m5, file = paste0("data_sim/evaluations/m5_evaluations_", i, ".RDS"))
 
-
+ print(paste0("Simulation 1:", i, " is done."))
 }
 

@@ -27,6 +27,9 @@ library(DESeq2)
 
 # 02. Download and prep data #################################################
 
+
+if(!dir.exists("data/")) dir.create("data/")
+
 if(!file.exists("data/m1_results.RDS")) {
 
   dat <- seqwraphelper::geo_data(gse = "GSE202295")
