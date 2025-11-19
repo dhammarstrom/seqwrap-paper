@@ -35,11 +35,9 @@ editor_options:
   chunk_output_type: console
 ---
 
-<!-- From guidelines: Please note: editable files are required for processing in production. If your manuscript contains any non-editable files (such as PDFs) you will be required to re-submit an editable file when you submit your revised manuscript, or after editorial acceptance in case no revision is necessary. --> 
-
+<!-- From guidelines: Please note: editable files are required for processing in production. If your manuscript contains any non-editable files (such as PDFs) you will be required to re-submit an editable file when you submit your revised manuscript, or after editorial acceptance in case no revision is necessary. -->
 
 <!-- The abstract should not exceed 350 words -->
-
 
 **Keywords:** High-dimensional data, RNA-sequencing, ... <!-- Three to ten keywords -->
 
@@ -54,15 +52,13 @@ show_figures <- TRUE
 
 ```
 
-
-
 ## Background
 
 <!-- Outline -->
 
 High-dimensional data, such as those derived from high-throughput nucleotide sequencing platforms or mass spectrometry systems, are becoming increasingly commonplace in many research settings in medicine and biology, either as the primary outcome of investigations or as supporting evidence for other primary outcomes. To accommodate statistical analysis of such data, many specialized software packages have been developed. These packages are typically designed to handle data with specific distributional assumptions using a limited set of modelling formulations. For example, high-dimensional gene expression data derived from microarrays is commonly analyzed using limma [@ritchie_limma_2015], which employs a Gaussian model. However, when gene expression data are derived from next-generation sequencing platforms, gene counts are analyzed using models that assume a negative binomial distribution in packages such as DESeq2 [@anders_differential_2010; @love_moderated_2014] and edgeR [@robinson_edger_2010]. Although limma, DESeq2, and edgeR all incorporate information from the whole data set in the estimation of differential expression through shrinkage of dispersion or mean parameters [@ritchie_limma_2015, @love_moderated_2014,@robinson_edger_2010], modelling is done on a gene-by-gene basis. However, these packages are limited in their ability to analyze data from more complex designs, including data with hierarchical structure.
 
-To address this limitation, multiple additional software packages have been developed, specifically designed for repeated measures data [@vestal_lmerseq_2022; @hoffman_dream_2021; @nguyen_rmrnaseq_2020; @lewis_glmmseq_2022; @bian_pairedfb_2019; @van_de_wiel_shrinkbayes_2014; @vestal_mcmseq_2020]. Notably, Vestal et al. use a linear mixed-effects model framework to analyze transformed count RNA-seq data, assuming normally distributed errors [@vestal_lmerseq_2022], while Lewis et al. use a negative binomial generalized linear mixed-effects model to directly model counts, both in hierarchical data, such as repeated-measures designs. Interestingly, both tools mentioned above were built using established modeling packages in the R ecosystem, lme4 [@bates_fitting_2015], nlme [@pinheiro2000], and glmmTMB [@brooks_glmmtmb_nodate], to iteratively model gene expression data on a gene-by-gene basis. Although pre-specified modeling decisions simplify the user experience, they may also limit necessary flexibility. Conversely, the R ecosystem offers a collection of packages for building regression models that account for hierarchical data (e.g., lme4, glmmTMB, lmerTest) [@brooks_glmmtmb_nodate; @kuznetsova_lmertest_2017; @bates_fitting_2015]. Additionally, several R packages are devoted to post-fitting diagnostics and analysis of such models (emmeans [@lenth_emmeans_2025], performance [@ludecke_performance_2021], marginaleffects [@arel-bundock_how_2024]). Together, these packages provide a rich functionality for flexible model building, including evaluation and diagnostics. However, there is a lack of tools to combine the use of these established packages in complex, high-dimensional data scenarios.
+To address this limitation, multiple additional software packages have been developed, specifically designed for repeated measures data ; such as lmerseq[@vestal_lmerseq_2022], Dream [@hoffman_dream_2021], rmRNAseq [@nguyen_rmrnaseq_2020], glmmseq [@lewis_glmmseq_2022], PairedFB [@bian_pairedfb_2019], ShrinBayes [@van_de_wiel_shrinkbayes_2014] , MCMSeq [@vestal_mcmseq_2020]. Notably, lmerseq uses a linear mixed-effects model framework to analyze transformed gene expression counts , assuming normally distributed errors [@vestal_lmerseq_2022], while glmmseq uses a negative binomial generalized linear mixed-effects model to directly model counts, both in hierarchical data, such as repeated-measures designs. Interestingly, both tools mentioned above were built using established modeling packages in the R ecosystem, lme4 [@bates_fitting_2015], nlme [@pinheiro2000], and glmmTMB [@brooks_glmmtmb_nodate], to iteratively model gene expression data on a gene-by-gene basis. Although pre-specified modeling decisions simplify the user experience, they may also limit necessary flexibility. Conversely, the R ecosystem offers a collection of packages for building regression models that account for hierarchical data (e.g., lme4, glmmTMB, lmerTest) [@brooks_glmmtmb_nodate; @kuznetsova_lmertest_2017; @bates_fitting_2015]. Additionally, several R packages are devoted to post-fitting diagnostics and analysis of such models (emmeans [@lenth_emmeans_2025], performance [@ludecke_performance_2021], marginaleffects [@arel-bundock_how_2024]). Together, these packages provide a rich functionality for flexible model building, including evaluation and diagnostics. However, there is a lack of tools to combine the use of these established packages in complex, high-dimensional data scenarios.
 
 Here, we present seqwrap, an R package that provides a flexible, high-level wrapper for the iterative modeling of high-dimensional data using established R-based modeling frameworks, such as nlme, lme4, and glmmTMB. It simplifies the process of specifying, fitting, and evaluating both simple and complex models across multiple iterations. By leveraging recent developments in glmmTMB, we also show that information sharing across targets in a high-dimensional data set is possible using priors based on the distribution of parameter values from non-informed models in a two-step workflow. Together, this makes seqwrap a convenient tool for creating flexible, principled workflows for high-dimensional omics data.
 
@@ -100,12 +96,11 @@ b_{0[j]} &\sim \operatorname{Normal}(0, \sigma_g)
 \end{align}
 $$ {#eq-model-1}
 
-Our model uses the parameterization $\operatorname{Var}(Y) = \mu + \frac{\mu^2}{\theta}$ so that $\theta$ represents the inverse dispersion (as implemented in the glmmTMB package as `nbinom2`).   
-
+Our model uses the parameterization $\operatorname{Var}(Y) = \mu + \frac{\mu^2}{\theta}$ so that $\theta$ represents the inverse dispersion (as implemented in the glmmTMB package as `nbinom2`).
 
 #### Simulation study
 
-To evaluate the performance of different models, we used the distribution of estimates from the preliminary model (@eq-model-1, @fig-m1-estimates) to simulate 10 data sets, each with 10000 genes. Simulated parameter values were used to construct the expected values of a negative binomial distribution. Two parameters (&beta;~1~ and &beta;~5~) were simulated with two sets of genes (1250 genes each) that were given non-null effects. These effects were drawn from a uniform distribution with a minimum of 0.2 and a maximum of 1. For the &beta;~1~ parameter, the effect was given a positive and a negative sign with equal probability, while the parameter &beta;~5~ was simulated with positive signs with 75% probability to match the characteristics of the observed data [@pillon2022]. We used the estimated mean-dispersion relationship to simulate dispersion parameter values from a normal distribution centered on the trend, with a SD equal to the residual standard error of a local polynomial regression model with equal weights given to all dispersion estimates or weights given to each observation proportional to the inverse standard error of the dispersion estimate. This created two dispersion scenarios with on high and one low variability among gene-specific dispersion parameters (@fig-m1-estimates).  
+To evaluate the performance of different models, we used the distribution of estimates from the preliminary model (@eq-model-1, @fig-m1-estimates) to simulate 10 data sets, each with 10000 genes. Simulated parameter values were used to construct the expected values of a negative binomial distribution. Two parameters (β~1~ and β~5~) were simulated with two sets of genes (1250 genes each) that were given non-null effects. These effects were drawn from a uniform distribution with a minimum of 0.2 and a maximum of 1. For the β~1~ parameter, the effect was given a positive and a negative sign with equal probability, while the parameter β~5~ was simulated with positive signs with 75% probability to match the characteristics of the observed data [@pillon2022]. We used the estimated mean-dispersion relationship to simulate dispersion parameter values from a normal distribution centered on the trend, with a SD equal to the residual standard error of a local polynomial regression model with equal weights given to all dispersion estimates or weights given to each observation proportional to the inverse standard error of the dispersion estimate. This created two dispersion scenarios with on high and one low variability among gene-specific dispersion parameters (@fig-m1-estimates).
 
 ```{r}
 #| echo: false
@@ -129,8 +124,7 @@ if (show_figures) {
 
 Simulated data sets were used to assess inferential performance of five types of models, the negative binomial model (already described in @eq-model-1), a Poisson model with observation-level random effects (OLRE) to handle overdispersion, and a Gaussian model with transformed count data as the dependent variable, as previously suggested [@vestal_lmerseq_2022]. The negative binomial and the Poisson OLRE models were further extended to include parameter regularization using priors estimated from preliminary models. All models contained the same fixed-effect structure, including group, time and their interaction, as well as a random intercept per participant (@eq-model-1).
 
-The Poisson OLRE model includes both a varying intercept term for each participant (*j*) in the data set (*b~0[j]~*) and an OLRE (*b~0[i]~*) for each observation in the data set (*i*). Poisson OLRE have previously been used to account for overdispersion in count data with favorable characteristics [@harrison2014], including RNA-seq data [@sun2017]. Similar to the negative binomial model (@eq-model-1), the Poisson model includes an offset term representing the size factor of the library size (*s~i~*; @eq-model-2).    
-
+The Poisson OLRE model includes both a varying intercept term for each participant (*j*) in the data set (*b~0\[j\]~*) and an OLRE (*b~0\[i\]~*) for each observation in the data set (*i*). Poisson OLRE have previously been used to account for overdispersion in count data with favorable characteristics [@harrison2014], including RNA-seq data [@sun2017]. Similar to the negative binomial model (@eq-model-1), the Poisson model includes an offset term representing the size factor of the library size (*s~i~*; @eq-model-2).
 
 $$
 \begin{align}
@@ -144,7 +138,7 @@ $$ {#eq-model-2}
 
 For a single gene, the model can be fitted with the `glmmTMB` package using the Poisson family distribution and an observation-level indicator variable to add OLRE. Using `seqwrap`, the model can be readily applied to the whole gene count matrix (see supplementary material for a complete code example).
 
-To regularize parameter estimates in the Negative Binomial and Poisson OLRE models, we used estimates from the non-informed models (@eq-model-1, @eq-model-2) as priors in subsequent models. This approach is analogous to borrowing information across genes and to the moderation of test statistics, as implemented in popular packages for RNA-seq analysis [@mccarthy2012; @love_moderated_2014; @robinson_edger_2010]. Priors for variance components  (*b~0[i]~* and *b~0[j]~*) were defined using the Gamma distribution with means estimated from non-informed models and a fixed shape parameter of 2 to avoid too much density on 0. For fixed effects (&beta;~g[m]~, where m represents parameter 1 to m, excluding the intercept), normal distributions were used with mean zero and standard deviations corresponding to the standard deviation of the distribution of parameter estimates in the non-informed models. Finally, for the Negative Binomial model, a normal prior was used for the dispersion parameter, with a mean equal to the expected value from the estimated mean-dispersion relationship (local polynomial regression) from non-informed models and a standard deviation equal to the residual standard deviation of the same model. The complete model formulation for the negative binomial model is shown in @eq-model-3.        
+To regularize parameter estimates in the Negative Binomial and Poisson OLRE models, we used estimates from the non-informed models (@eq-model-1, @eq-model-2) as priors in subsequent models. This approach is analogous to borrowing information across genes and to the moderation of test statistics, as implemented in popular packages for RNA-seq analysis [@mccarthy2012; @love_moderated_2014; @robinson_edger_2010]. Priors for variance components (*b~0\[i\]~* and *b~0\[j\]~*) were defined using the Gamma distribution with means estimated from non-informed models and a fixed shape parameter of 2 to avoid too much density on 0. For fixed effects (β~g\[m\]~, where m represents parameter 1 to m, excluding the intercept), normal distributions were used with mean zero and standard deviations corresponding to the standard deviation of the distribution of parameter estimates in the non-informed models. Finally, for the Negative Binomial model, a normal prior was used for the dispersion parameter, with a mean equal to the expected value from the estimated mean-dispersion relationship (local polynomial regression) from non-informed models and a standard deviation equal to the residual standard deviation of the same model. The complete model formulation for the negative binomial model is shown in @eq-model-3.
 
 $$
 \begin{align}
@@ -163,7 +157,6 @@ Here, we used the `glmmTMB` package [@brooks2017a] to fit models that produce *m
 #### Gene set analysis in real data
 
 We compared results from the different models in the observed data [@pillon2022] using over-representation analysis and rank based [@zyla2019].
-
 
 ## Results
 
@@ -194,7 +187,7 @@ gene.counts <- true_effects |>
 
 ```
 
-In the simulated data sets, on average, `r gene.counts[3,2]` genes were retained after filtering of low-count targets, of which `r gene.counts[2,2]` (min-max, `r gene.counts[2,4]`-`r gene.counts[2,5]`) were true positives and `r gene.counts[1,2]` (`r gene.counts[1,4]`-`r gene.counts[1,5]`) were true negatives for each parameter of interest (baseline group differences, &beta;~1~, and the second group-time interaction parameter, &beta;~5~). Variability in the simulated gene dispersion parameter and sample size affected the number of retained targets, with more targets retained with less variability in simulated dispersion values and increased sample size (Supplementary Figure 1).
+In the simulated data sets, on average, `r gene.counts[3,2]` genes were retained after filtering of low-count targets, of which `r gene.counts[2,2]` (min-max, `r gene.counts[2,4]`-`r gene.counts[2,5]`) were true positives and `r gene.counts[1,2]` (`r gene.counts[1,4]`-`r gene.counts[1,5]`) were true negatives for each parameter of interest (baseline group differences, β~1~, and the second group-time interaction parameter, β~5~). Variability in the simulated gene dispersion parameter and sample size affected the number of retained targets, with more targets retained with less variability in simulated dispersion values and increased sample size (Supplementary Figure 1).
 
 ```{r}
 #| echo: false
@@ -213,8 +206,7 @@ conv_stats <- convergence_stats |>
 
 ```
 
-In our simulated data sets, we were unable to retrieve model estimates from some gene targets due to failed model convergence. Most notably, using the strict criteria of filtering out singular fits from the results [@vestal_lmerseq_2022], on average `r round(conv_stats[3,3],1)`%, (SD among data sets: `r round(conv_stats[3,5],1)`) of potential targets were returned from the Gaussian model of transformed counts under the high variability dispersion scenario. The non-informed negative binomial model also had considerable loss of gene estimates (`r round(conv_stats[1,3],1)`% (`r round(conv_stats[1,5],1)`) targets with estimates). In contrast, the non-informed Poisson OLRE model performed slightly better (`r round(conv_stats[4,3],1)`% (`r round(conv_stats[4,5],1)`)). Under the low-variability dispersion scenario, all three models performed better by producing estimates in `r round(conv_stats[6,3],1)` (`r round(conv_stats[6,5],1)`), `r round(conv_stats[8,3],1)` (`r round(conv_stats[8,5],1)`), and `r round(conv_stats[9,3],1)` (`r round(conv_stats[9,5],1)`)% of all potential models. Interestingly, the regularized alternatives to the negative binomial and the Poisson OLRE models produced estimates for practically all potential gene targets (>99.9%). Relaxing the criteria for the Gaussian model also yielded estimates for almost all potential gene targets (>99.9%; supplementary Figure 2). 
-
+In our simulated data sets, we were unable to retrieve model estimates from some gene targets due to failed model convergence. Most notably, using the strict criteria of filtering out singular fits from the results [@vestal_lmerseq_2022], on average `r round(conv_stats[3,3],1)`%, (SD among data sets: `r round(conv_stats[3,5],1)`) of potential targets were returned from the Gaussian model of transformed counts under the high variability dispersion scenario. The non-informed negative binomial model also had considerable loss of gene estimates (`r round(conv_stats[1,3],1)`% (`r round(conv_stats[1,5],1)`) targets with estimates). In contrast, the non-informed Poisson OLRE model performed slightly better (`r round(conv_stats[4,3],1)`% (`r round(conv_stats[4,5],1)`)). Under the low-variability dispersion scenario, all three models performed better by producing estimates in `r round(conv_stats[6,3],1)` (`r round(conv_stats[6,5],1)`), `r round(conv_stats[8,3],1)` (`r round(conv_stats[8,5],1)`), and `r round(conv_stats[9,3],1)` (`r round(conv_stats[9,5],1)`)% of all potential models. Interestingly, the regularized alternatives to the negative binomial and the Poisson OLRE models produced estimates for practically all potential gene targets (\>99.9%). Relaxing the criteria for the Gaussian model also yielded estimates for almost all potential gene targets (\>99.9%; supplementary Figure 2).
 
 ```{r}
 #| echo: false
@@ -229,15 +221,13 @@ est <- readRDS("data-out/simulation-estimates.RDS")
 
 ```
 
-
-When comparing models for sensitivity, i.e., the capability to detect true effects (using FDR-adjusted p-values < 0.05), the regularized negative binomial model, on average, outperformed all other models across both dispersion scenarios and sample sizes, except in small data sets in the low-variability scenario (@fig-figure2 A). Notably, the Gaussian model of transformed counts performed considerably worse, with sensitivities approximately equal to those of the regularized negative binomial model with half the sample size for the main effect (@fig-figure2 A). Comparing the negative binomial models to the Poisson OLRE models, only minor differences were detected.  
+When comparing models for sensitivity, i.e., the capability to detect true effects (using FDR-adjusted p-values \< 0.05), the regularized negative binomial model, on average, outperformed all other models across both dispersion scenarios and sample sizes, except in small data sets in the low-variability scenario (@fig-figure2 A). Notably, the Gaussian model of transformed counts performed considerably worse, with sensitivities approximately equal to those of the regularized negative binomial model with half the sample size for the main effect (@fig-figure2 A). Comparing the negative binomial models to the Poisson OLRE models, only minor differences were detected.
 
 Coincidentally, regularizing the negative binomial and Poisson OLRE models improved the correlation between the ranked estimated effects and the ranked population effects used to simulate the data for truly differentially expressed targets (@fig-figure2 B).
 
-After p-value adjustment (FDR-correction), the negative binomial and Poisson OLRE models had slightly higher false discovery rates for the &beta;~1~ parameter estimates and the &beta;~5~ parameter estimate under the low variability scenario compared to the Gaussian transformed counts model, something that was rescued by regularization. The interaction effect (&beta;~5~ estimates) yielded more false discoveries under the high-variability scenario, with higher sample sizes producing more without reaching the 5% target threshold (@fig-figure2 C).
+After p-value adjustment (FDR-correction), the negative binomial and Poisson OLRE models had slightly higher false discovery rates for the β~1~ parameter estimates and the β~5~ parameter estimate under the low variability scenario compared to the Gaussian transformed counts model, something that was rescued by regularization. The interaction effect (β~5~ estimates) yielded more false discoveries under the high-variability scenario, with higher sample sizes producing more without reaching the 5% target threshold (@fig-figure2 C).
 
 Collectively, the results of our simulation study support the use of the regularized negative binomial or Poisson OLRE models for inference in our real-world data set.
-
 
 ```{r}
 #| echo: false
@@ -259,14 +249,7 @@ if (show_figures) {
 
 ```
 
-
-### Comparing models 
-
-
-
-
-
-
+### Comparing models
 
 ## Discussion
 
