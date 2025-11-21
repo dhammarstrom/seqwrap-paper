@@ -121,7 +121,7 @@ if(!file.exists("data/m1_results.RDS")) {
 m1_results <- readRDS("data/m1_results.RDS")
 
 
-m1_sum <- seqwrap_summarise(m1_results)
+m1_sum <- seqwrap_summarise(m1_results, verbose = FALSE)
 
 # Fit a trend to the dispersion data from m1
 # save the data in a convenient format.
