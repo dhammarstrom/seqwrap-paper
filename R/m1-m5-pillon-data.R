@@ -2,12 +2,16 @@
 # Model the Pillon data using all suggested models.
 #
 # 01. Packages
-# IF m1 result do not exixts ---
-# 02. Download and prep data
-# 03. A preliminary model
+# 02. Download and prep data for Model 1
+# 03. A preliminary model (NB )
 # ------------------------------
-# 04. Load data
-#
+# 04. Load data from model 1
+# 05. Prepare priors for model 2
+# 06. Fitting Model 2
+# 07. Model 3 - Gaussian on transformed counts
+# 08. Model 4 - Non-informed Poisson OLRE
+# 09. Model 5 - Prepare priors
+# 10. Combine all relevant output for analysis
 #
 ################################################################################
 
@@ -21,6 +25,7 @@ library(ggtext)
 library(glmmTMB)
 library(edgeR)
 library(DESeq2)
+library(DHARMa)
 
 # Detect number of cores to use in seqwrap
 CORES <- parallel::detectCores()
@@ -85,14 +90,6 @@ if(!dir.exists("data/")) dir.create("data/")
   # mean(predict(x, type = "link)) will give us the predicted log counts.
   # We will put this in the eval fun to also get estimates of the parameters in
   # the generic summary function.
-  sigma_summary <- function(x) {
-
-    out <- data.frame(dispersion =  data.frame(summary(x$sdr))["betadisp",1],
-                      dispersion.se = data.frame(summary(x$sdr))["betadisp",2],
-                      log_mu = mean(predict(x, type = "link")))
-    return(out)
-
-  }
 
 
   if(!file.exists("data/m1_results.RDS")) {
@@ -102,7 +99,7 @@ if(!dir.exists("data/")) dir.create("data/")
     metadata = metadat,
     samplename = "seq_sample_id",
     modelfun = glmmTMB,
-    eval_fun = sigma_summary,
+    eval_fun = sigma_summary2,
     arguments = list(
       formula = y ~ time * group + offset(ln_efflibsize) + (1|id),
       family = glmmTMB::nbinom2)
@@ -297,7 +294,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
     metadata =  metadat,
     samplename = "seq_sample_id",
     modelfun = glmmTMB::glmmTMB,
-    eval_fun = sigma_summary,
+    eval_fun = sigma_summary2,
     targetdata =  Priors_list,
     arguments = alist(
       formula =  y ~ time * group + offset(ln_efflibsize) + (1|id),
@@ -322,7 +319,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
 
 
-# 07. Model 3 ##################################################################
+# 07. Model 3 - Gaussian on transformed counts ################################
 
 
 
@@ -370,11 +367,11 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
 
   m4  <- seqwrap_compose(
-    data = countdats,                  # These are the filtered counts
+    data = countdat,                  # These are the filtered counts
     metadata = metadat,
     samplename = "seq_sample_id",
     modelfun = glmmTMB::glmmTMB,
-    eval_fun = poisson_summary,
+    eval_fun = sigma_summary2,
     targetdata = NULL,
     arguments = list(
       formula = y ~ time * group + offset(ln_efflibsize) + (1|id) +
@@ -393,12 +390,12 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
     saveRDS(m4_results, "data/m4_results.RDS")
 
-    m4_sum <- seqwrap_summarise(m4_results, verbose = FALSE)
+
 
   }
 
   m4_results <- readRDS("data/m4_results.RDS")
-
+  m4_sum <- seqwrap_summarise(m4_results, verbose = FALSE)
 
 # 09. Model 5 - Prepare priors and fit model ##################################
 
@@ -406,7 +403,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
   ## Model 2 ##
   # get successful targets
-  targets <- evaluations[[k1]] |>
+  targets <- m4_sum$evaluations |>
     filter(convergence == 0) |>
     distinct(target) |>
     pull(target)
@@ -421,7 +418,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
   #  ggplot(aes(estimate)) + geom_density() +
   #  facet_wrap(~ term, scales = "free")
 
-  estimate_distributions <- summaries[[k1]] |>
+  estimate_distributions <-  m4_sum$summaries |>
     filter(target %in% targets) |>
     select(target, term, group, estimate) |>
 
@@ -432,14 +429,14 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
   # Extract the random effects distribution to fit a gamma distribution
   # on the participant level intercepts
-  random_sd_estimate <- summaries[[k1]] |>
+  random_sd_estimate <- m4_sum$summaries|>
     filter(target %in% targets,
            term == "sd__(Intercept)",
            group == "id") |>
     select(target, term, estimate) |>
     pull(estimate)
 
-  random_sd_estimate_obs <- summaries[[k1]] |>
+  random_sd_estimate_obs <- m4_sum$summaries |>
     filter(target %in% targets,
            term == "sd__(Intercept)",
            group == "seq_sample_id") |>
@@ -487,7 +484,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
   # dispersion parameter. This means that we need a gene specific prior
 
   Priors_list <- list()
-  for( j in 1:nrow( combined_data[[k1]]$counts)) {
+  for( j in 1:nrow( countdat )) {
 
     Priors_list[[j]] <- Priors_df
 
@@ -499,25 +496,57 @@ m1_sums  <- seqwrap_summarise(m1_results)
 
   # Here we specify priors based the results from ms1
 
-  ms2 <- seqwrap_compose(
-    data =  combined_data[[k1]]$counts,
-    metadata =  combined_data[[k1]]$metadata,
+  if(!file.exists("data/m5_results.RDS")) {
+
+  m5 <- seqwrap_compose(
+    data =  countdat,
+    metadata =  metadat,
     samplename = "seq_sample_id",
     modelfun = glmmTMB::glmmTMB,
-    eval_fun = poisson_summary,
+    eval_fun = sigma_summary2,
     targetdata =  Priors_list,
     arguments = alist(
-      formula = y ~ time * condition + offset(ln_efflibsize) + (1|id) + (1|seq_sample_id),
+      formula = y ~ time * group + offset(ln_efflibsize) + (1|id) + (1|seq_sample_id),
       family = stats::poisson,
       priors = data.frame(
         prior = prior,
         class = class,
         coef = coef) ))
 
-  ms2_results <- seqwrap(
-    ms2,
-    return_models = FALSE, verbose = FALSE,
+  m5_results <- seqwrap(
+    m5,
+    return_models = FALSE,
+    verbose = FALSE,
     #  subset = 1:50,
     cores = CORES)
+
+
+
+  saveRDS(m5_results, "data/m5_results.RDS")
+
+
+
+  }
+
+  m5_results <- readRDS("data/m5_results.RDS")
+
+
+  # 10. Combine all relevant output for analysis ##############################
+
+  saveRDS(
+    list(m1_results = m1_results,
+       m2_results = m2_results,
+       m3_results = m3_results,
+       m4_results = m4_results,
+       m5_results = m5_results,
+       filtered_counts = countdat,
+       metadata = metadat),
+    "data-out/pillon-models.RDS")
+
+
+
+
+
+
 
 

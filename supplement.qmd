@@ -44,6 +44,8 @@ Here the Pillion gene expression data is downloaded and transformed using VST as
 #| label: libraries and data preprocessing
 #| code-fold: true
 #| echo: false
+
+
 library(lmerSeq)
 library(DESeq2)
 library(edgeR)
@@ -611,6 +613,97 @@ est |>
 
 
 ```
+
+
+## Analyzing real-world data [@pillon2022]
+
+
+```{r}
+
+
+models_data  <-  readRDS("data-out/pillon-models.RDS")
+
+
+### Count number of successful models 
+summaries <- lapply(models_data[1:5], seqwrap_summarise, verbose = FALSE)
+
+
+targets_models <- bind_rows(
+  summaries$m1_results$evaluations |> 
+  mutate(model = "m1"), 
+  summaries$m2_results$evaluations |> 
+  mutate(model = "m2"), 
+  summaries$m3_results$evaluations |> 
+  mutate(model = "m3"), 
+  summaries$m4_results$evaluations |> 
+  mutate(model = "m4"), 
+  summaries$m5_results$evaluations |> 
+  mutate(model = "m5") ) |> 
+  
+  # Filter singular fits and bad convergence
+  filter(!(model == "m3" & isSingular == TRUE)) |> 
+  # Poisson and NB models do not have pdHess == FALSE or convergence != 0
+  # but for failsafe
+  filter(!(model %in% c("m1", "m2", "m4", "m5") & 
+           (pdHess == FALSE | convergence != 0))) |> 
+  group_by(model) |> 
+  distinct(target)
+
+## Sums number of successful targets  
+targets_models |> 
+  ungroup() |> 
+  summarise(.by = model, 
+            n = n()) |> 
+  # Add total 
+  mutate(total = nrow(models_data$filtered_counts), 
+         estimated_prop = n / total) 
+  
+
+
+
+## Summaries
+bind_rows(
+  summaries$m1_results$summaries |> 
+  mutate(model = "m1"), 
+  summaries$m2_results$summaries |> 
+  mutate(model = "m2"), 
+  summaries$m3_results$summaries |> 
+  mutate(model = "m3"), 
+  summaries$m4_results$summaries |> 
+  mutate(model = "m4"), 
+  summaries$m5_results$summaries |> 
+  mutate(model = "m5") ) |> 
+  
+  # This filter away singular fits from m3 
+  inner_join(targets_models) |> 
+  
+  filter(term %in% c("groupT2D", "timepost:groupT2D", "timerec:groupT2D")) |> 
+  
+  # Adjust p-values and calculate MSD
+  mutate(.by = c(model, term), 
+         fdr = p.adjust(p.value, method = "fdr")) |> 
+  # Approximate CI
+  mutate(lwr = estimate - qnorm(0.975) * std.error, 
+         upr = estimate + qnorm(0.972) * std.error, 
+         msd = if_else(estimate > 0, lwr, -upr)) |> 
+
+  
+  print()
+  
+
+  
+  
+summaries$m1_results$summaries
+
+
+
+
+
+
+
+
+```
+
 
 
 
