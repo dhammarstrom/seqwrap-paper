@@ -883,5 +883,58 @@ extract_simulations <- function(evaluations_path = "data_sim/evaluations",
 
 
 
+# 08. Sigma summary common for both Poisson and NB models on real data
+# Includes simulated residuals.
+
+sigma_summary2 <- function(x) {
+
+  if(is.null(x$fit$convergence)) {
+    conv <- 1
+  } else {
+    conv <- x$fit$convergence[[1]]
+  }
+
+
+  ### Simulating scaled resid ###
+  # This creates simulated residuals for test of uniformity, dispersion and
+  # heteroscedasticity. See
+  # https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html
+  # for details.
+  residObj <- DHARMa::simulateResiduals(x, plot = FALSE)
+
+  # Saving tests from DHARMa
+  unif <- DHARMa::testUniformity(residObj, plot = FALSE)
+  disp <- DHARMa::testDispersion(residObj, plot = FALSE)
+  quant <- DHARMa::testQuantiles(residObj, plot = FALSE)
+
+
+  # Saving SD of Obs Level Rand Eff in the Poisson model
+
+  tidy_coef <- broom.mixed::tidy(x)
+
+  if (any(tidy_coef$group %in% "seq_sample_id")) {
+    olre.sd <- tidy_coef |>
+      filter(group == "seq_sample_id") |>
+      pull(estimate)
+  } else { olre.sd <- NA }
+
+
+
+  # Combine all in a data frame
+  out <- data.frame(dispersion =  data.frame(summary(x$sdr))["betadisp",1],
+                    dispersion.se = data.frame(summary(x$sdr))["betadisp",2],
+                    olre.sd = olre.sd,
+                    log_mu = mean(predict(x, type = "link")),
+                    convergence = conv,
+                    pdHess = x$sdr$pdHess,
+                    aic = AIC(x),
+                    unif.p = unif$p.value,
+                    unif.stat = unif$statistic,
+                    disp.p = disp$p.value,
+                    disp.stat = disp$statistic,
+                    quant.p = quant$p.value)
+  return(out)
+
+}
 
 
