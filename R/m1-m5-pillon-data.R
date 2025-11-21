@@ -117,6 +117,8 @@ if(!dir.exists("data/")) dir.create("data/")
 
 m1_results <- readRDS("data/m1_results.RDS")
 
+
+
 m1_sums  <- seqwrap_summarise(m1_results)
 
   ## Model 2 ##
