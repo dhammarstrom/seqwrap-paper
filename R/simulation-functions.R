@@ -896,8 +896,8 @@ sigma_summary2 <- function(x) {
 
 
   ### Simulating scaled resid ###
-  # This creates simulated residuals for test of uniformity, dispersion and
-  # heteroscedasticity. See
+  # This creates simulated residuals for test of uniformity and dispersion.
+  # See
   # https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html
   # for details.
   residObj <- DHARMa::simulateResiduals(x, plot = FALSE)
@@ -905,7 +905,6 @@ sigma_summary2 <- function(x) {
   # Saving tests from DHARMa
   unif <- DHARMa::testUniformity(residObj, plot = FALSE)
   disp <- DHARMa::testDispersion(residObj, plot = FALSE)
-  quant <- DHARMa::testQuantiles(residObj, plot = FALSE)
 
 
   # Saving SD of Obs Level Rand Eff in the Poisson model
@@ -931,10 +930,7 @@ sigma_summary2 <- function(x) {
                     unif.p = unif$p.value,
                     unif.stat = unif$statistic,
                     disp.p = disp$p.value,
-                    disp.stat = disp$statistic,
-                    quant.p = quant$p.value)
+                    disp.stat = disp$statistic)
   return(out)
 
 }
-
-
