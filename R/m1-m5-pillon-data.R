@@ -386,7 +386,7 @@ m1_sums  <- seqwrap_summarise(m1_results)
       m4,
       return_models = FALSE,
       verbose = FALSE,
-      # subset = 1:1100,
+      # subset = 1:16,
       cores = CORES)
 
 
@@ -519,9 +519,8 @@ m1_sums  <- seqwrap_summarise(m1_results)
     m5,
     return_models = FALSE,
     verbose = FALSE,
-    #  subset = 1:50,
+     # subset = 1:50,
     cores = CORES)
-
 
 
   saveRDS(m5_results, "data/m5_results.RDS")

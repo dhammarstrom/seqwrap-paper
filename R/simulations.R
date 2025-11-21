@@ -66,17 +66,17 @@ for(i in 1:10) {
   # Fitting naive and informed Neg-Binom model. The informed model has
   # a more narrow prior for the mean-dispersion fit as we use un-weighted estimates
   # of the loess regression.
-  m1_m2_results_b <- m1_m2_sim(d$combined_data,
-                             dataset = i,
-                             dofit = TRUE,
-                             weighted_loess = FALSE,
-                             CORES = cores)
-
-  saveRDS(m1_m2_results_b$summaries_m1, file = paste0("data_sim/estimates/m1b_estimates_", i, ".RDS"))
-  saveRDS(m1_m2_results_b$summaries_m2, file = paste0("data_sim/estimates/m2b_estimates_", i, ".RDS"))
-
-  saveRDS(m1_m2_results_b$evaluations_m1, file = paste0("data_sim/evaluations/m1b_evaluations_", i, ".RDS"))
-  saveRDS(m1_m2_results_b$evaluations_m2, file = paste0("data_sim/evaluations/m2b_evaluations_", i, ".RDS"))
+ # m1_m2_results_b <- m1_m2_sim(d$combined_data,
+ #                            dataset = i,
+ #                            dofit = TRUE,
+ #                            weighted_loess = FALSE,
+ #                            CORES = cores)
+#
+ # saveRDS(m1_m2_results_b$summaries_m1, file = paste0("data_sim/estimates/m1b_estimates_", i, ".RDS"))
+ # saveRDS(m1_m2_results_b$summaries_m2, file = paste0("data_sim/estimates/m2b_estimates_", i, ".RDS"))
+#
+ # saveRDS(m1_m2_results_b$evaluations_m1, file = paste0("data_sim/evaluations/m1b_evaluations_", i, ".RDS"))
+ # saveRDS(m1_m2_results_b$evaluations_m2, file = paste0("data_sim/evaluations/m2b_evaluations_", i, ".RDS"))
 
 
   # Model 3 ################################################

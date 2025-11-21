@@ -913,8 +913,8 @@ sigma_summary2 <- function(x) {
 
   if (any(tidy_coef$group %in% "seq_sample_id")) {
     olre.sd <- tidy_coef |>
-      filter(group == "seq_sample_id") |>
-      pull(estimate)
+      dplyr::filter(group == "seq_sample_id") |>
+      dplyr::pull(estimate)
   } else { olre.sd <- NA }
 
 
