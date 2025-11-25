@@ -28,7 +28,11 @@ author:
         department: Department of Public Health and Sport Sciences 
     attributes:
       corresponding: true
-format: typst
+format:
+  typst:
+    include-before-body:        
+      - text: |      
+          #show figure.caption: set text(size: 9pt)
 csl: resources/bmc-bioinformatics.csl
 bibliography: resources/bibliography.bib
 editor_options: 
