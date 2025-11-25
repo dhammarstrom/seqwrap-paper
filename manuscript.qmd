@@ -217,15 +217,13 @@ In our simulated data sets, we were unable to retrieve model estimates from some
 est <- readRDS("data-out/simulation-estimates.RDS")
 
 
-
-
 ```
 
-When comparing models for sensitivity, i.e., the capability to detect true effects (using FDR-adjusted p-values \< 0.05), the regularized negative binomial model, on average, outperformed all other models across both dispersion scenarios and sample sizes, except in small data sets in the low-variability scenario (@fig-figure2 A). Notably, the Gaussian model of transformed counts performed considerably worse, with sensitivities approximately equal to those of the regularized negative binomial model with half the sample size for the main effect (@fig-figure2 A). Comparing the negative binomial models to the Poisson OLRE models, only minor differences were detected.
+When comparing models for sensitivity, i.e., the capability to detect true effects (using FDR-adjusted p-values < 0.05), the regularized negative binomial model, on average, outperformed all other models across both dispersion scenarios and sample sizes, except in small data sets in the low-variability scenario (@fig-figure2 A). Notably, the Gaussian model of transformed counts performed considerably worse, with sensitivities approximately equal to those of the regularized negative binomial model with half the sample size for the main effect (@fig-figure2 A). Comparing the negative binomial models to the Poisson OLRE models, only minor differences were detected.
 
 Coincidentally, regularizing the negative binomial and Poisson OLRE models improved the correlation between the ranked estimated effects and the ranked population effects used to simulate the data for truly differentially expressed targets (@fig-figure2 B).
 
-After p-value adjustment (FDR-correction), the negative binomial and Poisson OLRE models had slightly higher false discovery rates for the β~1~ parameter estimates and the β~5~ parameter estimate under the low variability scenario compared to the Gaussian transformed counts model, something that was rescued by regularization. The interaction effect (β~5~ estimates) yielded more false discoveries under the high-variability scenario, with higher sample sizes producing more without reaching the 5% target threshold (@fig-figure2 C).
+After p-value adjustment (FDR-correction), the negative binomial and Poisson OLRE models had slightly higher false discovery rates for the β~1~ parameter estimates and the β~5~ parameter estimate under the low variability scenario compared to the Gaussian transformed counts model, something that was rescued by regularization. The interaction effect (β~5~ estimates) yielded more false discoveries under the high-variability scenario, with higher sample sizes producing more false discoveries without reaching the 5% target threshold (@fig-figure2 C).
 
 Collectively, the results of our simulation study support the use of the regularized negative binomial or Poisson OLRE models for inference in our real-world data set.
 
@@ -249,31 +247,146 @@ if (show_figures) {
 
 ```
 
-### Comparing models
+
+
+```{r}
+#| label: stats-est
+#| echo: false
+#| message: false
+#| warning: false
+
+n_estimates <- readRDS("data-out/non-est-prop.RDS")
+
+
+m3_nonest <- round(n_estimates[3,5][[1]],1)
+m1_nonest <- round(n_estimates[1,5][[1]],1)
+
+
+stat <- readRDS("data-out/estimates-pillon.RDS")
+
+# Baseline differences
+sig_gene_baseline <- stat |> 
+  filter(term == "groupT2D", 
+         fdr < 0.05) 
+  
+sig_gene_baseline <- paste0(sig_gene_baseline[1,1][[1]],", fold-change: ",
+       round(mean(sig_gene_baseline$estimate),2),
+       " (T2D vs. control), FDR<", 
+       round(max(sig_gene_baseline[1,12]),3))  
+
+
+```
+
+
+
+Similarly to the simulation study, modelling the real-world data also led to a larger number of models that did not reach convergence or the criteria of non-singular fits in the Gaussian model of transformed counts (`r m3_nonest`%). Among the count based models, the non-informed negative binomial model had `r m1_nonest`% gene targets without valid estimates. Regularized models returned estimates for all gene targets (@fig-figure3 A).
+
+We compared models for their expected out-of-sample performance using AIC and found the regularized Poisson OLRE model to perform better in most cases (>80%) compared to the negative binomial model. Non-informed models where comparable compared (@fig-figure3 B).
+
+At baseline only one target was declared as differentially expressed in the non-informed models (`r sig_gene_baseline`). However, as expected, the most notable effects were seen in the differences in gene expression changes in response to exercise (3-hours recovery time-point) between disease groups where the most sensitive model, the regularized Poisson OLRE, declared 2877 gene targets as differentially expressed (FDR < 0.05; @fig-figure3 C). Most gene targets that where declared as differentially expressed between groups at the recover time-point  were common in all count-based models (30%; @fig-figure3 C). An additional 22% of the differentially expressed targets were common between the regularized models that identified considerably more targets than the non-informed models. Among the regularized models, the Poisson OLRE model and negative binomial models uniquely identified 21 and 14%, respectively. The Gaussian model of transformed counts only identified 32 gene targets as differentially expressed, all of which where also identified by the other models (@fig-figure3 C).
+
+When we ranked genes based on their fold changes between disease groups (time &times; group interaction effect) and performed gene set enrichment analysis (GSEA) there were only minor differences between models in gene sets with the highest effect sizes (@tbl-gsea), indicating that the ranked fold-changes of gene sets were similar between models. @fig-figure3 C illustrates two gene sets found to be enrich among the top positively and negatively ranked genes in the T2D vs. control comparison (time &times; group interaction).  
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "(A) Number of models with missing estimates due to non-convergence or singular fits (Gaussian model of transformed counts). (B) Using AIC to compare models showed lower AIC values in a most regularized Poisson OLRE models compared to regularized negative binomial models. In non-informed models, the negative binomial and Poisson OLRE where comparable (percentages show number of comparisons in favour of Poisson models). (C) Number of gene targets declared as differentially expressed (FDR < 0.05) in each model and per intersection. (D) Example gene sets identified as significantly enriched."
+#| fig-width: 6.69
+#| fig-height: 7.87
+#| out-width: "170mm"
+#| out-height: "200mm"
+#| label: fig-figure3
+
+
+if (show_figures) {
+  figure3 <- readRDS("figures/figure-3.RDS")
+  figure3
+}
+
+
+
+
+```
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| tbl-cap: "Gene set enrichment analysis of fold-changes in all models. For each model the top (and bottom) ranked gene sets were selected based on -log~10~(FDR) &times; NES. The sign of the normalized effect size (NES) indicate enrichment at top (positive fold-change in T2D vs. control) and bottom (negative fold change) ranked genes."
+#| label: tbl-gsea
+
+library(gt)
+library(stringr)
+
+gsea_results <- readRDS("data-out/gsea_results.RDS")
+
+
+gsea_up <- gsea_results |> 
+  
+  slice_max(order_by = (-log10(p.adjust) * NES), n = 2, by = model) |> 
+  dplyr::select(-core_enrichment) |> 
+    mutate(model_descr = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE"))) 
+
+gsea_down <- gsea_results |> 
+  
+  slice_max(order_by = -(-log10(p.adjust) * NES), n = 2, by = model) |> 
+  dplyr::select(-core_enrichment) |> 
+    mutate(model_descr = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE"))) 
+
+
+
+bind_rows(gsea_up, gsea_down) |>  
+          mutate(NES = round(NES, 2)) |>
+  dplyr::select(model_descr,ID, Description, setSize, NES, p.adjust) |> 
+  mutate(Description = str_to_title(Description)) |> 
+  
+ gt(groupname_col = "model_descr") |> 
+  fmt_scientific(columns = p.adjust) |> 
+  opt_table_font(size = 10) |> 
+  cols_label("ID"=  "Gene ontology ID", 
+             "setSize" = "Set size", 
+             "p.adjust" = "FDR")
+
+
+
+
+```
+
+
+
 
 ## Discussion
 
-Continuous technological advances and reduced costs have led to the widespread use of high-dimensional data in the biological sciences. Despite this, different types of high-dimensional data are typically analyzed in specialized software [@conesa2016,@chen2020], which often have limited capabilities to handle complex study designs, different distributional assumptions, and hierarchical structures. Here, we propose a simple solution for analysing high-dimensional data, seqwrap, an R-based package designed to iterate over a large number of targets using established R-based modelling algorithms. Using established R-based modelling software increases flexibility and transparency. It also enables the adoption of newly developed software features to improve statistical efficiency. 
+Increasingly available high-dimensional data in the medical and biological sciences are typically analyzed using specialized software [@conesa2016;@chen2020]. Such software packages often have limited capabilities to handle complex study designs, to accommodate different distributional assumptions, and to define hierarchical model structures. For RNA-seq data analysis, the lack of flexibility in handling hierarchical structures, such as random effects that account for repeated sampling within the same individual, has led to the development of several R packages for fitting mixed-effects models. Notably, glmmSeq [@lewis_glmmseq_2022] and lmerSeq [@vestal_lmerseq_2022] use established R modelling algorithms (from the glmmTMB, lme4, and nlme packages) to iterate over RNA-seq targets (i.e., genes or transcripts). However, only the lmerSeq package provides an indirect mechanism for information sharing across genes by suggesting the VST transformation from the DESeq2 package, which utilizes a fitted mean-dispersion relationship informed by the whole data set to transform counts to an approximate log-scaled variable used in a Gaussian mixed-effects model. Sharing information across targets is a key feature of canonical packages used for RNA-seq data analysis, such as edgeR and DESeq2. This feature is included to improve statistical efficiency while maintaining false discovery rates. A more formal model for accommodating information-sharing across targets while accounting for repeated measures was presented in MCMSeq, which uses an observed mean-dispersion relationship to construct a prior distribution for the dispersion parameter in a fully Bayesian framework. Currently, MCMSeq is restricted to the negative binomial distribution and a single random intercept term. 
 
-A key benefit of specialized software regularly used for RNA sequencing and proteomics, such as edgeR, DESeq2, and limma, is the sharing of information across targets (genes or proteins) through the shrinkage of model parameter estimates using, e.g., empirical Bayes. As these packages have limited capabilities in accommodating experimental designs that include e.g., correlation structures, several alternatives have been proposed [@vestal_lmerseq_2022,@hoffman_dream_2021,@nguyen_rmrnaseq_2020, @lewis_glmmseq_2022, @bian_pairedfb_2019, @van_de_wiel_shrinkbayes_2014, @vestal_mcmseq_2020]. However, these newly proposed packages are typically limited in respect to random effect structures [@vestal_mcmseq_2020,@bian_pairedfb_2019], the incorporation of information sharing across gene targets through shrinkage [@vestal_lmerseq_2022,@hoffman_dream_2021,@nguyen_rmrnaseq_2020, @lewis_glmmseq_2022], and, importantly, the ability to specify different distributional families for the outcome data. In this paper, we show that recently implemented priors in the glmmTMB package enable flexible empirical Bayes shrinkage[@efron2010] in hierarchical models. Additionally, we show that flexibility in selecting distributional assumptions can increase statistical efficiency for a given data set.
+Overall, as exemplified by RNA-seq data analysis, specialized high-dimensional data analysis packages lack the flexibility to accommodate complex model specifications while sharing information across targets. Here, we propose a simple solution to these limitations, seqwrap, an R-based package designed to iterate over a large number of targets using established R-based modelling algorithms. Utilizing newly developed features of the glmmTMB package, we show that, through a two-step modeling process, information from the whole data set can be used as priors in subsequent models to achieve empirical Bayes shrinkage of model parameters. In simulations and a real-world data set, we show that regularization via model-informed priors increases power while reducing type-1 error rates and increasing the number of targets with model estimates by avoiding model non-convergence. At the same time, the glmmTMB package offers flexibility in selecting distributional families, making our proposed workflow general across several classes of high-dimensional data, e.g., proteomics or metabolomics.
 
+Even for a specific class of outcome data, e.g., those derived from RNA-seq experiments, the user has several analytic options, including the choice to use count-based models or to transform the data to enable the use of models that assume normally distributed errors. Arguably, transforming counts into a continuous variable to remove the inherent mean-variance relationship is a tempting strategy for complex data, as it enables the use of well-established mixed-effects models. Indeed, Vestal et al. showed that selecting a more appropriate transformation (VST compared to VOOM) and modelling strategies can increase efficiency while maintaining type-1 error rates [@vestal_lmerseq_2022]. However, when we replicated the approach suggested in [@vestal_lmerseq_2022] in our simulations, we saw that this strategy has considerably lower sensitivity in detecting truly differentially expressed targets, while at the same time obscuring the association between ranked estimates and ranked (simulated) population effects. In line with our simulations, the transformed count method identified only a few differentially expressed targets in our real-world data example; however, this did not lead to different conclusions when (approximate) fold-changes were used for rank-based gene set enrichment, showing robustness in ranks despite lower sensitivity, presumably due to increased noise. However, interestingly, our simulations showed that informed models, using empirical Bayes shrinkage of model parameters, were needed to outperform the transformed count model on some metrics, such as type-1 error rates and correlations between estimated and population-level effects, when the simulated dispersion parameters were highly variable. This was true for both the negative binomial model and the Poisson OLRE model. Although the VST transformation used in the transformed count model includes shrinkage of the dispersion parameter through the estimation of a mean-dispersion relationship as part of the transformation (REF DESeq2), we speculate that this could contribute to a reduced sensitivity through the addition of noise, as the dispersion model is not aware of the repeated measures nature of the data, although this requires further investigation. 
 
-[@conesa2016] <!-- Best practice RNA-seq -->
-
-[@chen2020] <!-- Example of Bioinfo workflow in proteomics -->
-
- <!-- Efron large scale: describes the empirical bayes procedure -->
+To highlight the flexibility of using established, non-specialized software for fitting models to high-dimensional data, we incorporated the Poisson OLRE model into our analysis. The Poisson OLRE model has previously been used for RNA-seq data, with simulations showing favorable conditions when compared to the canonical negative binomial model [@sun2017]. Our simulation study indicates that the regularized versions of the negative binomial and Poisson OLRE models are overall comparable. However, in the real-world data example, there seem to be subtle differences between the models. ... These differences could potentially be attributed to how the different models handle overdispersion.            
 
 
+Conclusions
 
 
-Investigating certain factors and/or their effects on a population tend to demand complex study designs which thus require suitable statistical methods/algorithms for data analysis. We have presented seqwrap; an R-based package for iterative modelling of high-dimensional data . Through the analysis of both the simulated data and the Pillon et al. data, we demonstrate seqwrap's compatibility with different well-established modelling algorithms. The simulation studies lead us to conclude that regularized models perform better in identifying differential expressions than the simpler/non-regularized models.
+       
 
-We show that seqwrap offers flexibility no matter the distributional assumptions or complexity of the study designs; a factor that is important when addressing complex problems. We demonstrate seqwrap's compatibility with several modelling frameworks, thereby showing that users need not be restricted to using one or a few modelling frameworks. seqwrap can be compared to similar wrapper-style packages like glmmseq and lmerseq, but unlike them, it does not limit users to one or two modelling algorithms as it supports analysis using any of the R packages listed in **Table ........** The simple R interface and the flexibility of seqwrap makes it suitable for analysis of transcriptomics and other omics-style data of any design.
 
--   The choice of models and transformations affects inference, systematic evaluation of available choices can help us learn more from the data. This relates to the comparisons made between NB-models and those implemented in e.g., lmerseq
--   Shrinkage is a way to share information across genes, using seqwrap, shrinkage can be introduced through multiple mechanisms. Multi-step models may be used to build custom shrunken estimates
--   Specialized software implementation exists for specific high-dimensional data (e.g. gene counts or protein expression). Relying on well established modelling frameworks can increase transparency in assumptions and limitations.
+
 
 ## Conclusions
 

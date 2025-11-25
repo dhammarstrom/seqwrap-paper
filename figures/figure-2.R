@@ -49,7 +49,7 @@ keep_targets <- bind_rows(sim_results$evaluations,
 
   # This has large effect on number of fitted models
   filter(!(model == "m3" & isSingular == TRUE)) |>
-  select(target, model, dataset = datasets, size, disp_scenario)
+  dplyr::select(target, model, dataset = datasets, size, disp_scenario)
 
 
 
@@ -61,7 +61,7 @@ est_temp <- bind_rows(sim_results$estimates,
   filter(term %in% c("conditionB", "timet3:conditionB")) |>
   # dataset was mis-named in the simulations.
   rename(dataset = datasets) |>
-  select(- file)
+  dplyr::select(- file)
 
 
 est <- est_temp |>
@@ -69,13 +69,13 @@ est <- est_temp |>
     bind_rows(sim_results$populationeffects,
               sim_results2$populationeffects) |>
       mutate(target = as.character(target)) |>
-      select(-file)) |>
+      dplyr::select(-file)) |>
   inner_join(
     keep_targets |>
       mutate(target = as.character(target))
   ) |>
 
-  select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
+  dplyr::select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
 
   mutate(.by = c(model, term, size, dataset, disp_scenario),
          fdr = p.adjust(p.value, method = "fdr")) |>
