@@ -816,6 +816,10 @@ ggsave("figures/figure-3.pdf",
       print()
 
 
+
+
+
+
  temp |>
 
       ggplot(aes(mean.timerec_m2, estimate_m2)) +
@@ -829,6 +833,10 @@ ggsave("figures/figure-3.pdf",
                   y = estimate_m2, yend = estimate_m5))
 
 
+
+
+
+
  bind_rows(
    summaries$m1_results$evaluations |>
      mutate(model = "m1"),
@@ -840,18 +848,18 @@ ggsave("figures/figure-3.pdf",
    summaries$m5_results$evaluations |>
      mutate(model = "m5") )  |>
 
-   filter(model %in% c("m1", "m2")) |>
+   filter(model %in% c("m2", "m5")) |>
    dplyr::select(model, target:dispersion.se) |>
    pivot_wider(names_from = model,
                values_from = c(dispersion, dispersion.se)) |>
 
-   mutate(disp.diff = dispersion_m1 - dispersion_m2) |>
+   mutate(disp.diff = dispersion_m2 - dispersion_m5) |>
 
    inner_join(temp) |>
 
 
 
-   ggplot(aes(dispersion_m1, dispersion_m2, color = concl)) + geom_point(alpha = 0.2)
+   ggplot(aes(dispersion_m2, dispersion_m5, color = concl)) + geom_point(alpha = 0.2)
 
    print()
 
@@ -894,8 +902,8 @@ bind_rows(
   dplyr::select(target, model, log_mu, var) |>
   inner_join(obs) |>
 
-  summarise(.by = model,
-            c = cor(log(var), log(var.obs)))
+#  summarise(.by = model,
+#            c = cor(log(var), log(var.obs)))
 
 
   ggplot(aes(log(var.obs), log(var))) + geom_point() +
