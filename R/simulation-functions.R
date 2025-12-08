@@ -934,3 +934,78 @@ sigma_summary2 <- function(x) {
   return(out)
 
 }
+
+
+## 08. Extract raw counts ####################################################
+# This function calculate mean counts for each data set
+# in the simulation at the relevant terms
+extract_rawcounts <- function(sim_folder = "data_sim/simdata2/raw/") {
+
+  # Sample ids for each data set
+  samps <- list(small_baseline_samp = c(paste0(paste0("A", 1:8), "_t1"),
+                                        paste0(paste0("B", 1:10),"_t1")),
+                small_time3_samp = c(paste0(paste0("A", 1:8), "_t3"),
+                                     paste0(paste0("B", 1:10),"_t3")),
+                medium_baseline_samp = c(paste0(paste0("A", 1:16), "_t1"),
+                                         paste0(paste0("B", 1:20),"_t1")),
+                medium_time3_samp = c(paste0(paste0("A", 1:16), "_t3"),
+                                      paste0(paste0("B", 1:20),"_t3")),
+                large_baseline_samp = c(paste0(paste0("A", 1:32), "_t1"),
+                                        paste0(paste0("B", 1:40),"_t1")),
+                large_time3_samp = c(paste0(paste0("A", 1:32), "_t3"),
+                                     paste0(paste0("B", 1:40),"_t3")))
+
+  # A small meta data for the data sets
+  meta_data <- data.frame(size = c("small", "small",
+                                   "medium", "medium",
+                                   "large", "large"),
+                          term = rep(c("conditionB", "timet3:conditionB"), 3))
+
+  # Extract the observed mean/variances
+  mean_var <- function(samps, counts) {
+
+    temp <- counts |>
+      dplyr::select(gene, matches(samps))
+
+
+   out <-  data.frame(target = counts[,1],
+               m = rowMeans(temp[,-1]),
+               var = apply(temp[,-1], 1, var))
+
+   return(out)
+
+  }
+
+
+  files <- list.files(sim_folder)
+
+  d <- list()
+  for(i in seq_along(files)) {
+
+  dataset <- gsub(".RDS", "", gsub("dataset_", "", files[i]))
+  temp <-  readRDS(paste0(sim_folder, files[i]))
+
+  dsub <- list()
+  for(j in 1:nrow(meta_data)) {
+
+    dsub[[j]] <- mean_var(samps[[j]], temp$counts) |>
+      mutate(size = meta_data[j,1][[1]],
+             term = meta_data[j,2][[1]],
+             dataset = dataset)
+
+  }
+
+  d[[i]] <- bind_rows(dsub)
+
+
+  }
+
+  out <- bind_rows(d)
+  return(out)
+}
+
+
+
+
+
+

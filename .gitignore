@@ -32,6 +32,9 @@ vignettes/*.pdf
 *_cache/
 /cache/
 
+*_files/
+
+
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
@@ -52,9 +55,14 @@ rsconnect/
 /ome-data/
 # Do not track simulation results or other large files
 data_sim/
+data_sim-*/
 data-raw/
 data-out/
 data/
 
 # Do not track PDFs
 *.pdf
+
+# do not track .docx
+*.docx
+

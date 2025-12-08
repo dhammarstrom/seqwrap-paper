@@ -60,7 +60,7 @@ est_temp <- bind_rows(sim_results$estimates,
   # Retain only terms of interest.
   filter(term %in% c("conditionB", "timet3:conditionB")) |>
   # dataset was mis-named in the simulations.
-  rename(dataset = datasets) |>
+  dplyr::rename(dataset = datasets) |>
   dplyr::select(- file)
 
 
@@ -442,7 +442,7 @@ figure2 <- plot_grid(
   plot_grid(p1, p2,
             ncol = 1,
             rel_heights = c(1, 1)),
-  plot_grid(p3, ggdraw(legend[[3]]),
+  plot_grid(p3, ggdraw(legend),
                     rel_heights = c(1, 1),
                     ncol = 1),
   rel_widths = c(1, 1)) +
