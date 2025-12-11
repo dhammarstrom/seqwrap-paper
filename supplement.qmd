@@ -26,10 +26,12 @@ format:
     toc: true
     include-in-header:
       text: |
+        #show figure.caption: set text(size: 9pt)
         #show outline: it => {
           v(2em)  // Add vertical space before TOC
           it
         }
+        
 csl: resources/bmc-bioinformatics.csl
 bibliography: resources/bibliography.bib
 execute: 
@@ -1109,18 +1111,19 @@ m1_sums  <- seqwrap_summarise(m1_results)
 Below follows supplementary results from the simulation study. 
 
 ```{r}
-#| label: fig-genecounts-simulated
-#| fig-cap: "Number of simulated gene targets (true negative and true positives) across dispersion scenarios and sample sizes."
+#| label: load-sim-results
 #| echo: false
 #| message: false
 #| warning: false
 
 
+
+library(cowplot)
+
 source("figures/figure-opts.R")
 
 ## Load data from simulations
 source("R/simulation-functions.R")
-
 
 # Extract simulations sorts out all simulations files and combines them.
 # This is simulations with dispersion scenario 1.
@@ -1136,9 +1139,22 @@ sim_results2 <- extract_simulations(evaluations_path = "data_sim/evaluations2",
                                    disp_scenario = "s2")
 
 
+```
+
+
+
+
+```{r}
+#| label: fig-genecounts-simulated
+#| fig-cap: "Number of simulated gene targets (true negative and true positives) across dispersion scenarios and sample sizes."
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-height: 6
+
+
+
 # Number of genes in each simulated data set
-
-
 bind_rows(sim_results$populationeffects, 
           sim_results2$populationeffects) |> 
   # Filter to keep only 1 term
@@ -1176,14 +1192,16 @@ bind_rows(sim_results$populationeffects,
         strip.background = element_blank(), 
         strip.text = element_text(hjust = 0)) + 
   facet_wrap(~ effect, scales = "free", ncol = 1)
+
 ```
 
 
 
 
 ```{r}
-#| eval: false
-
+#| echo: false
+#| message: false
+#| warning: false
 
 
 # Number of genes per data set with true population effect
@@ -1196,17 +1214,14 @@ true_effects <- bind_rows(sim_results$populationeffects,
 # Savining for manuscript
 saveRDS(true_effects, "data-out/true_effects.RDS")
 
-
-
-
 # Combine all true/false effects
 est_temp <- bind_rows(sim_results$estimates, 
           sim_results2$estimates) |> 
   # Retain only terms of interest.
   filter(term %in% c("conditionB", "timet3:conditionB")) |>
   # dataset was mis-named in the simulations.
-  rename(dataset = datasets) |>
-  select(- file)
+  dplyr::rename(dataset = datasets) |>
+  dplyr::select(- file)
 
 
 est <- est_temp |> 
@@ -1216,7 +1231,7 @@ est <- est_temp |>
                mutate(target = as.character(target)) |>
                select(-file)) |>
 
-  select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
+  dplyr::select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
 
   mutate(.by = c(model, term, size, dataset, disp_scenario),
          fdr = p.adjust(p.value, method = "fdr")) |>
@@ -1233,32 +1248,33 @@ est <- est_temp |>
 
 
 ```{r}
-#| eval: false
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
 
 
-
-# 
 convergence_stats <- bind_rows(sim_results$evaluations, 
           sim_results2$evaluations) |> 
-  select(-file) |> 
+  dplyr::select(-file) |> 
   mutate(conv = if_else(model == "m3" & isSingular == TRUE, FALSE, 
                         if_else(model != "m3" & convergence != 0, FALSE, TRUE)), 
          conv.nonstrict = if_else(model != "m3" & convergence != 0, FALSE, TRUE)) |> 
-  rename(dataset = datasets) |> 
-  select(target, size, model, dataset, disp_scenario, isSingular, conv, conv.nonstrict) |> 
+  dplyr::rename(dataset = datasets) |> 
+   dplyr::select(target, size, model, dataset, disp_scenario, isSingular, conv, conv.nonstrict) |> 
 
   inner_join(
     bind_rows(sim_results$populationeffects, 
               sim_results2$populationeffects) |>
                mutate(target = as.character(target)) |>
-               select(-file) |> 
+                dplyr::select(-file) |> 
       mutate(effect = if_else(population_effect == 0, "n", "p")) |> 
-      select(target, term, dataset, size, disp_scenario, effect) |> 
+       dplyr::select(target, term, dataset, size, disp_scenario, effect) |> 
       pivot_wider(names_from = term, values_from = effect) |> 
       mutate(effect = paste0(conditionB, ":", `timet3:conditionB`)) |> 
       mutate(.by = c(dataset, size, effect, disp_scenario), 
              ntotal = n()) |> 
-      select(-conditionB, - `timet3:conditionB`) 
+       dplyr::select(-conditionB, - `timet3:conditionB`) 
   )  |> 
   
   summarise(.by = c(model, dataset, disp_scenario, effect, size), 
@@ -1268,18 +1284,17 @@ convergence_stats <- bind_rows(sim_results$evaluations,
   
   
 
-
-  
-saveRDS(convergence_stats, "data-out/covergence_stats.RDS" )
-
-
 ```
 
 
 ```{r}
-#| eval: false
+#| eval: true
+#| echo: false
+#| warning: false
+#| message: false
 #| label: fig-convergence
 #| fig-cap: "Number of models that provided estimates as a percentage of all potential targets. In (A), a strict criteria was used for convergence for the Gaussian model of transformed counts where models with singular fits where excluded as suggested by Vestal et al. (2022). In (B) all converged models are included."
+#| fig-height: 8
 
 
 
@@ -1287,9 +1302,9 @@ p1 <- convergence_stats |>
 
   mutate(success = 100 *  (conv / ntotal), 
          size = factor(size, levels = c("small", "medium", "large"), 
-                       labels = c("Small (m = 54, n = 18)", 
-                                  "Medium (m = 108, n = 36)", 
-                                  "Large (m = 216, n = 72)")), 
+                       labels = c("Small\n(m = 54, n = 18)", 
+                                  "Medium\n(m = 108, n = 36)", 
+                                  "Large\n(m = 216, n = 72)")), 
          disp_scenario = factor(disp_scenario, 
                                 levels = c("s1", "s2"), 
                                 labels = c("High dispersion\nvariability", 
@@ -1313,8 +1328,11 @@ p1 <- convergence_stats |>
         strip.text.y = element_text(angle = 0), 
         strip.text.x = element_text(hjust = 0), 
         legend.title = element_blank(), 
-        axis.text.x = element_blank()) + 
-  scale_color_manual(values = colors)
+        axis.text.x = element_blank(), 
+        legend.position = "bottom", 
+        legend.box = "vertical") + 
+  scale_color_manual(values = colors) + 
+  guides(color=guide_legend(nrow=3, byrow=TRUE))
   
   
   
@@ -1322,9 +1340,9 @@ p2 <-  convergence_stats |>
 
   mutate(success = 100 *  (conv.nonstrict / ntotal), 
          size = factor(size, levels = c("small", "medium", "large"), 
-                       labels = c("Small (m = 54, n = 18)", 
-                                  "Medium (m = 108, n = 36)", 
-                                  "Large (m = 216, n = 72)")), 
+                       labels = c("Small\n(m = 54, n = 18)", 
+                                  "Medium\n(m = 108, n = 36)", 
+                                  "Large\n(m = 216, n = 72)")), 
          disp_scenario = factor(disp_scenario, 
                                 levels = c("s1", "s2"), 
                                 labels = c("High dispersion\nvariability", 
@@ -1350,11 +1368,13 @@ p2 <-  convergence_stats |>
         legend.title = element_blank(), 
         axis.text.x = element_blank(), 
         legend.position = "none")  + 
-  scale_color_manual(values = colors)
+  scale_color_manual(values = colors) 
   
 plot_grid(p1, 
-          plot_grid(p2, NULL, rel_widths = c(1, 0.32)), 
-          ncol = 1)
+          p2, 
+          ncol = 1, 
+          rel_heights = c(1, 0.8),
+          labels = c("A", "B"))  
 
 ```
 
@@ -1363,7 +1383,14 @@ plot_grid(p1,
 
 
 ```{r}
-#| eval: false
+#| label: fig-pdist
+#| fig-cap: "Distribution of unadjusted p-values from all null-effects in models of simulated data. Non-uniform distributions indicate mis-specified models, i.e. models that do not capture variation in the data. Models are the negative binomial (NB), regularized negative binomial (NB-R), the Gaussian model of transformed counts (Gaussian), the Poisson observation-level random effect model (POLRE) and the regularized Poisson observation-level random effect model (POLRE-R)."
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-height: 8
+#| fig-width: 6
+
 
 # P-value distributions for null genes
 
@@ -1382,75 +1409,88 @@ est |>
                                         "m4_timet3:conditionB",
                                         "m5_timet3:conditionB"
                                         ), 
-                             labels = c("Model 1\nMain", 
-                                        "Model 2\nMain",
-                                        "Model 3\nMain",
-                                        "Model 4\nMain",
-                                        "Model 5\nMain",
-                                        "Model 1\nInteraction",
-                                        "Model 2\nInteraction",
-                                        "Model 3\nInteraction",
-                                        "Model 4\nInteraction",
-                                        "Model 5\nInteraction"
+                             labels = c("NB\nMain", 
+                                        "NB-R\nMain",
+                                        "Gaussian\nMain",
+                                        "POLRE\nMain",
+                                        "POLRE-R\nMain",
+                                        "NB\nInteraction",
+                                        "NB-R\nInteraction",
+                                        "Gaussian\nInteraction",
+                                        "POLRE\nInteraction",
+                                        "POLRE-R\nInteraction"
                                         )), 
          size_disp = factor(paste0(size,"_", disp_scenario), 
-                            levels = c("small_s1", "medium_s1", "large_s1", 
-                                       "small_s2", "medium_s2", "large_s2"), 
-                            labels = c("Small\nHigh dispersion", 
-                                       "Medium\nHigh dispersion", 
-                                       "Large\nHigh dispersion", 
-                                       "Small\nLow dispersion", 
+                            levels = c("small_s2", "medium_s2", "large_s2", 
+                                       "small_s1", "medium_s1", "large_s1"), 
+                            labels = c("Small\nLow dispersion", 
                                        "Medium\nLow dispersion", 
-                                       "Large\nLow dispersion"
+                                       "Large\nLow dispersion", 
+                                       "Small\nHigh dispersion", 
+                                       "Medium\nHigh dispersion", 
+                                       "Large\nHigh dispersion"
                                        ))) |> 
   
   ggplot(aes(p.value)) +
-  geom_histogram(color="black", fill="grey40", binwidth = 0.025,
-                 boundary = 0, closed = "left") +
+  geom_histogram(color="black", fill=colors[2], binwidth = 0.025,
+                 boundary = 0, closed = "left", 
+                 linewidth = 0.1) +
   scale_x_continuous(breaks = c(0.05, 0.5, 1)) +
   facet_grid(model_coef ~ size_disp) + 
   theme_classic() + 
+  theme(strip.background = element_blank(), 
+        strip.text = element_text(size = 8), 
+        axis.text = element_text(size = 8)) +
   labs(x = "Un-adjusted P-value", 
        y = "")
 
 
 
-
-
-
-
-
-
 ```
 
 
 
 
-```{r}
-#| eval: false
-
-
-## Create averages
-
-```
-
-
 
 
 ```{r}
-#| eval: false
+#| label: fig-cor-sim
+#| fig-cap: "Average correlations between simulated population effects and estimates as a function of sample size in two parameters (Main and interaction effects) and two dispersion scenarios."
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-height: 5
+#| fig-width: 6
 
 
+# Model averages
+mod_avg <- est |>
+
+  filter(population_effect != 0) |>
+
+  mutate(.by = c(model, size, term, dataset, disp_scenario),
+         rank_true = rank(population_effect),
+         rank_obs = rank(estimate)) |>
+
+  summarise(.by = c(model, size, term, disp_scenario),
+            cor = cor(rank_true, rank_obs)) |>
+
+ mutate(size = factor(size, levels = c("small", "medium", "large"), 
+                       labels = c("Small", "Medium", "Large")),
+         model = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE")), 
+         disp_scenario = factor(disp_scenario, levels = c("s2", "s1"), 
+                                labels = c("Low variability", 
+                                           "High variability")), 
+        term = factor(term, levels = c("conditionB", "timet3:conditionB"), 
+                      labels = c("Main effect", 
+                                 "Interaction effect"))) 
 
 
-
-```
-
-
-
-
-```{r}
-#| eval: false
 
 est |>
 
@@ -1463,11 +1503,44 @@ est |>
   summarise(.by = c(model, size, term, dataset, disp_scenario),
             cor = cor(rank_true, rank_obs)) |>
 
-  mutate(size = factor(size, levels = c("small", "medium", "large"))) |>
-  ggplot(aes(size, cor, group = paste(model,dataset),
+ mutate(size = factor(size, levels = c("small", "medium", "large"), 
+                       labels = c("Small", "Medium", "Large")),
+         model = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE")), 
+         disp_scenario = factor(disp_scenario, levels = c("s2", "s1"), 
+                                labels = c("Low variability", 
+                                           "High variability")), 
+        term = factor(term, levels = c("conditionB", "timet3:conditionB"), 
+                      labels = c("Main effect", 
+                                 "Interaction effect")))  |>
+  
+  ggplot(aes(size, cor, group = paste(dataset, model),
              color = model)) +
-  geom_line() +
-  facet_grid(term ~ disp_scenario)
+  
+    
+  geom_line(alpha = 0.3) +
+  
+  geom_point(data = mod_avg, 
+             color = "black",
+             aes(group = NULL, shape = model, fill = model), 
+             size = 3) +
+  
+  scale_fill_manual(values = c(colors[1], colors[2], colors[4], colors[1], colors[2])) +
+  scale_color_manual(values = c(colors[1], colors[2], colors[4], colors[1], colors[2], 
+                                colors[1], colors[2], colors[4], colors[1], colors[2])) +
+  scale_shape_manual(values = c(22,22, 23, 25, 25)) +
+  
+
+  facet_grid(term ~ disp_scenario) +
+  theme_classic() + 
+  theme(strip.background = element_blank(), 
+        legend.title = element_blank(), 
+        axis.title.x = element_blank()) +
+  labs(y = "Average correlation (r)")
 
 
 
@@ -1477,6 +1550,8 @@ est |>
 
 ```{r}
 #| eval: false
+#| echo: false
+
 est |>
 
   filter(population_effect != 0) |>
@@ -1494,95 +1569,4 @@ est |>
 
 
 ```
-
-
-## Analyzing real-world data [@pillon2022]
-
-
-```{r}
-#| eval: false
-
-models_data  <-  readRDS("data-out/pillon-models.RDS")
-
-
-### Count number of successful models 
-summaries <- lapply(models_data[1:5], seqwrap_summarise, verbose = FALSE)
-
-
-targets_models <- bind_rows(
-  summaries$m1_results$evaluations |> 
-  mutate(model = "m1"), 
-  summaries$m2_results$evaluations |> 
-  mutate(model = "m2"), 
-  summaries$m3_results$evaluations |> 
-  mutate(model = "m3"), 
-  summaries$m4_results$evaluations |> 
-  mutate(model = "m4"), 
-  summaries$m5_results$evaluations |> 
-  mutate(model = "m5") ) |> 
-  
-  # Filter singular fits and bad convergence
-  filter(!(model == "m3" & isSingular == TRUE)) |> 
-  # Poisson and NB models do not have pdHess == FALSE or convergence != 0
-  # but for failsafe
-  filter(!(model %in% c("m1", "m2", "m4", "m5") & 
-           (pdHess == FALSE | convergence != 0))) |> 
-  group_by(model) |> 
-  distinct(target)
-
-## Sums number of successful targets  
-targets_models |> 
-  ungroup() |> 
-  summarise(.by = model, 
-            n = n()) |> 
-  # Add total 
-  mutate(total = nrow(models_data$filtered_counts), 
-         estimated_prop = n / total) 
-  
-
-
-
-## Summaries
-bind_rows(
-  summaries$m1_results$summaries |> 
-  mutate(model = "m1"), 
-  summaries$m2_results$summaries |> 
-  mutate(model = "m2"), 
-  summaries$m3_results$summaries |> 
-  mutate(model = "m3"), 
-  summaries$m4_results$summaries |> 
-  mutate(model = "m4"), 
-  summaries$m5_results$summaries |> 
-  mutate(model = "m5") ) |> 
-  
-  # This filter away singular fits from m3 
-  inner_join(targets_models) |> 
-  
-  filter(term %in% c("groupT2D", "timepost:groupT2D", "timerec:groupT2D")) |> 
-  
-  # Adjust p-values and calculate MSD
-  mutate(.by = c(model, term), 
-         fdr = p.adjust(p.value, method = "fdr")) |> 
-  # Approximate CI
-  mutate(lwr = estimate - qnorm(0.975) * std.error, 
-         upr = estimate + qnorm(0.972) * std.error, 
-         msd = if_else(estimate > 0, lwr, -upr)) |> 
-
-  
-  print()
-  
-
-  
-  
-summaries$m1_results$summaries
-
-
-
-
-
-
-
-
-```
-
 
