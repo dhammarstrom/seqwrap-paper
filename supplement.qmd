@@ -1570,3 +1570,71 @@ est |>
 
 ```
 
+
+## Supplementary tables
+
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| tbl-cap: "Gene set enrichment analysis of fold-changes in all models. For each model the top (and bottom) ranked gene sets were selected based on -log~10~(FDR) &times; NES. The sign of the normalized effect size (NES) indicate enrichment at top (positive fold-change in T2D vs. control) and bottom (negative fold change) ranked genes."
+#| label: tbl-gsea
+
+
+
+library(gt)
+library(stringr)
+
+gsea_results <- readRDS("data-out/gsea_results.RDS")
+
+
+gsea_up <- gsea_results |> 
+  
+  slice_max(order_by = (-log10(p.adjust) * NES), n = 2, by = model) |> 
+  dplyr::select(-core_enrichment) |> 
+    mutate(model_descr = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE"))) 
+
+gsea_down <- gsea_results |> 
+  
+  slice_max(order_by = -(-log10(p.adjust) * NES), n = 2, by = model) |> 
+  dplyr::select(-core_enrichment) |> 
+    mutate(model_descr = factor(model, levels = c("m1", "m2", "m3", "m4", "m5"),
+                        labels = c("Negative binomial (non-informed)",
+                                   "Regularized Negative binomial",
+                                   "Gaussian transformed counts",
+                                   "Poisson OLRE (non-informed)",
+                                   "Regularized Poisson OLRE"))) 
+
+
+
+bind_rows(gsea_up, gsea_down) |>  
+          mutate(NES = round(NES, 2)) |>
+  dplyr::select(model_descr,ID, Description, setSize, NES, p.adjust) |> 
+  mutate(Description = str_to_title(Description)) |> 
+  
+ gt(groupname_col = "model_descr") |> 
+  fmt_scientific(columns = p.adjust) |> 
+  opt_table_font(size = 10) |> 
+  cols_label("ID"=  "Gene ontology ID", 
+             "setSize" = "Set size", 
+             "p.adjust" = "FDR")
+
+
+
+
+
+
+```
+
+
+
+
+
