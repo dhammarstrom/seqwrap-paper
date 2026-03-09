@@ -1,0 +1,104 @@
+---
+title: "Response to comments: seqwrap: an R package for flexible iterative fitting of high-dimensional data"
+author:
+  - name: Chidimma Echebiri
+    email: chidimma.echebiri@inn.no
+    affiliation:
+      - name: University of Inland Norway
+        department: Department of Biotechnology, PhD programme in applied ecology and biotechnology
+  - name: Rafi Ahmad
+    email: rafi.ahmad@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Biotechnology
+  - name: Stian Ellefsen
+    email: stian.ellefsen@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+  - name: Daniel Hammarström*
+    email: daniel.hammarstrom@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+    attributes:
+      corresponding: true
+format: typst
+csl: resources/bmc-bioinformatics.csl
+bibliography: resources/bibliography.bib
+---
+
+`#v(3em)`{=typst}
+
+
+### Reviewer comments and author responses
+
+`#strong([Authors response.])`{=typst} We would first like to thank the editor and reviewers for their interest in our manuscript and their constructive criticism. The revised manuscript has benefited from the reviewers' points. We are addressing the reviewers' comments below.
+
+
+#### Reviewer 1
+
+This manuscript introduces a new R package seqwrap for handling high-dimensional data analysis. The authors design several functions and demonstrate several settings. In general, I think this manuscript is well written and is easy to read. I recommend major revision and provide some comments as follows.
+
+
+(1) In addition to the R packages listed in the current manuscript, several state-of-the-art R packages have been developed for high-dimensional data analysis (e.g., Chen and Qiu 2023, DOI: 10.32614/RJ-2023-080; Chen 2022, DOI: 10.1371/journal.pone.0276664), as well as for applications to gene expression data (e.g., Chen and Tsao 2024, DOI: 10.1093/bioinformatics/btae731). I suggest to add these references to make the literature review more comprehensive.
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for the suggestion to include the mentioned papers in the review. We agree that the suggested papers, together with the commonly cited WGCNA package, provide important functionality for analysing high-dimensional data. Adding these citations helps us position our package, as it mainly addresses the limitations of existing packages in handling hierarchical structures, e.g., in gene-by-gene (item-by-item) differential expression analysis. Changes were made at line 50- in the updated manuscript.
+
+
+(2) I think the authors can define the specific goals and add more detailed descriptions, such as model, data structure, types of responses, in the Implementation section. The current version defers several specific settings to the Case study section.
+
+
+`#strong([Authors response.])`{=typst} We agree with the reviewer that the capabilities of the package were not fully detailed in the implementation section. In the revised version, we have an overview of supported R packages and key features that are subsequently supported in seqwrap (Table 1, line 99-). These include, e.g., mixed-effects models, regularization (through priors in glmmTMB and penalized estimation in mgcv), and multiple response distributions and generalized additive models (through mgcv). We have also made the package's goal more succinct by contrasting different packages in the introduction (including network-based inference [@chentsao2024;@chen2024;@langfelder2008] vs. item-by-item modelling) and by highlighting compatible packages in the implementation section (line 92-). Data structures are described in the implementation section and in Figure 1.   
+
+(3) In Equation (1), please well define $\mu_{g[i,j]}$ and $\theta_g$ . What is the difference
+between those two symbols and $\mu$ and $\theta$ for Var(Y)?
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for spotting the inconsistencies in the description of the model. The relevant paragraph has been updated to include descriptions of $\mu_{g[i,j]}$ and $\theta_g$. We also updated the paragraph (line 170-) to more fully describe the notation. The full paragraph now reads:
+
+> Using the data from Pillon et al. [@pillon2022], we are interested in baseline differences in gene expression profiles between individuals with type 2 diabetes and healthy controls. Additionally, we want to determine differences in responses to the exercise session. Since the data have been collected using a repeated-measures design, in which samples are obtained from the same individuals at three time points, we use a mixed-effects model to directly obtain estimates of the baseline differences and the differences between groups in changes from baseline, while controlling for correlations among samples due to the repeated design using a varying intercept per participant (random intercept). Using a negative binomial (NB2) distribution for count data, [we construct a preliminary model for the gene-specific conditional mean ($\mu_{g[i,j]}$), where each observation (*i*) corresponds to a particular participant (*j*) at three time points (baseline, post-exercise (*t2*), and recovery (*t3*), where $\text{time}_{t2}$ and $\text{time}_{t3}$ are dummy variables relative to the baseline reference) belonging to one of two disease groups (normal glucose tolerance (*NGT*) and *diabetes* where *NGT* is the reference level). Model parameters $\beta_{0g}$ to $\beta_{5g}$ capture the intercept, main effects of group and time, and their interactions. A random intercept ($b_{0[j]}$, normally distributed with SD $\sigma_g$) accounts for participant-level correlation and an observation level offset $\operatorname{log}(\text{s}_i)$ accounts for differences in library size, where *s~i~* is the TMM-normalized library size [@robinson2010] divided by the median normalized library size. The NB2 distribution includes a dispersion parameter ($\theta_g$) to capture overdispersion.]{custom-style="edits"}
+
+$$
+\begin{align}
+Y_{g[i,j]} &\sim \operatorname{NB2}(\mu_{g[i,j]}, \theta_g) \\
+\operatorname{log}(\mu_{g[i,j]}) &= \eta_{g[i,j]} \\
+\eta_{g[i,j]} &= \beta_{0g} + \beta_{1g} \text{group}_{\text{diabetes}} + \beta_{2g} \text{time}_{t2} + \beta_{3g} \text{time}_{t3} +\\ 
+&\quad \beta_{4g} ( \text{time}_{t2}\times\text{group}_{\text{diabetes}}) + \\
+&\quad \beta_{5g} ( \text{time}_{t3}\times\text{group}_{\text{diabetes}}) + \\
+&\quad \operatorname{log}(\text{s}_i) + b_{0[j]} \\
+b_{0[j]} &\sim \operatorname{Normal}(0, \sigma_g)
+\end{align}
+$$ {#eq-model-1}
+
+> [Our model uses the parameterization $\text{Var}(Y_{g[i,j]}) = \mu_{g[i,j]} + \frac{\mu_{g[i,j]}^2}{\theta_{g}}$ so that $\theta_{g}$ represents the gene-specific inverse dispersion]{custom-style="edits"} (as implemented in the glmmTMB package as `nbinom2`).
+
+
+
+(4) Is your R package valid for performing variable selection?
+
+
+`#strong([Authors response.])`{=typst} Our package is not explicitly designed for formal variable selection. Since the general workflow proposed in our paper is to model targets (rows in a high-dimensional data set representing, e.g., genes, proteins, or similar) on a per-target basis, i.e., each target gets its own set of estimates, selection between targets as features has to be done by the user after model fitting. In principle, variable selection should be possible on a limited set of predictor variables by writing a custom summary function that takes advantage of, e.g., automatic step-wise procedures (e.g., `MASS::stepAIC`). As this would, in our view, represent a very particular use-case, we have not brought it up in the paper.  
+
+
+(5)  Do you compare your R package with existing ones, such as lmerseq, Dream, rmRNAseq, glmmseq, PairedFB, ShrinBayes, and MCMSeq, for simulation and real data analysis?
+
+`#strong([Authors response.])`{=typst} We directly compare `lmerseq` to our proposed workflow in the supplement. Here, we show that we can build the model used by the `lmerSeq.fit` function using seqwrap and obtain the same estimates. To illustrate differences between transformation strategies, we use the lmerseq-proposed VST transformation in the main case study to compare transforming counts for modelling in Gaussian, negative binomial, and Poisson-OLRE generalized linear mixed models. 
+
+(6) In addition, can you report the computational time of your R package. 
+
+`#strong([Authors response.])`{=typst} Since our package is essentially a wrapper for established R packages for fitting regression models, we refrained from comparing computational timing. The time required to fit models ultimately depends on the chosen model algorithm, the model definition, and the size of the data [@brooks_glmmtmb_nodate]. For the same data set, different packages will result in different time requirements. That said, we have added a timer to the package to indicate the elapsed time running a given model. This could help the user make more time-efficient modeling choices. We have added a simple example to the supplement (see "Comparing elapsed time" in Supplementary material) and highlighted this feature at the end of the implementation section (line 139-).
+
+
+#### Reviewer 2
+
+(1) I would provide a separate R script to reproduce ALL the results in the paper. I have tried copying and pasting the very first line to load the data and it does not work. I would also include all datasets so that no data needs to be downloaded from the Internet.
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for highlighting the need to make the examples easier to run. We have added the Dungan et al. [@dungan2022] and Pillon et al. [@pillon2022] data sets to the seqwrap package. These data sets are used in the examples in the supplement, and the Pillon [@pillon2022] data set is used throughout the manuscript case study. The simplified code should be easier to run, provided that seqwrap is installed. We have also reorganized the supplement to include instructions for installing seqwrap.  
+
+
+(2) In the main paper, I will include a table with the different models available. In the examples, a NB2 and Poisson models are discussed but there are probably other models that can be used. For these reasons, including a table with the possible models 
+
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for this suggestion. In the implementation section, we have added a table with packages tested for compatibility with the seqwrap package (line 99-). The table also includes examples of response distributions and other notable features relevant to the seqwrap package.
+
+
