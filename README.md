@@ -4,7 +4,7 @@
 ## Introduction
 
 This repository contains details of the relevant files, data and code
-needed to replicate the results and figures presented in the
+needed to reproduce the results and figures presented in the
 [seqwrap](https://github.com/trainome/seqwrap) paper.
 
 ## Relevant files and folders
