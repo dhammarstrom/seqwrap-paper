@@ -7,7 +7,9 @@ format: gfm
 
 This repository contains details of the relevant files, data and code needed to replicate the results and figures presented in the [seqwrap](https://github.com/trainome/seqwrap) paper.
 
-## Relevant folders
+## Relevant files and folders
+
+-   `supplement.qmd` Running this file reproduces the supplementary documents including the tables and figures therein
 
 -   `/R` This directory contains the scripts used to produce the results present in the paper. Below are short descriptions of what each file does
 
@@ -17,8 +19,30 @@ This repository contains details of the relevant files, data and code needed to 
 
     iii\. `m1-m5-pillion-data.R` This file builds ands save the models based on real world data from the [Pillion study](https://pubmed.ncbi.nlm.nih.gov/36070371/)
 
-    iv\. `simulations.R`
+    iv\. `make-sims.R` Runs the files `simulations.R` and `simulations2.R` which contain the generation and modelling of the simulated data set reported in the paper
 
-    v\. `simulations2.R`
+-   `/figures` The R files in this directory reproduces the figures in the paper
 
-## Recommended steps to reproduce analysis
+    `figure-1.R` reproduces Figure 1
+
+    `figure-2.R` reproduces Figure 2
+
+    `figure-3.R` reproduces Figure 3
+
+    `figure-opts.R` defines the custom color palette used in the figures.
+
+## Reproducing the analysis in the paper
+
+To reproduce the analysis from scratch, we recommend you run the scripts in this order
+
+1.  `/R/m1-m5-pillion-data.R` Would reproduce the case study analysis
+
+2.  `/R/make-sims.R` Would reproduce the simulation data and analysis
+
+3.  `supplement.qmd` Would reproduce the supplementary file
+
+4.   `/figures/figure-1.R` Would reproduce Figure 1
+
+5.   `/figures/figure-2.R` Would reproduce Figure 2
+
+6.  `/figures/figure-3.R` Would reproduce Figure 3
