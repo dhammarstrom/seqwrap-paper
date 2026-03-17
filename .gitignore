@@ -59,6 +59,9 @@ data_sim-*/
 data-raw/
 data-out/
 data/
+figures/*.RDS
+
+
 
 # Do not track PDFs
 *.pdf
