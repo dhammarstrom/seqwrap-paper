@@ -1,0 +1,74 @@
+---
+title: "Response to comments: seqwrap: an R package for flexible iterative fitting of high-dimensional data"
+author:
+  - name: Chidimma Echebiri
+    email: chidimma.echebiri@inn.no
+    affiliation:
+      - name: University of Inland Norway
+        department: Department of Biotechnology, PhD programme in applied ecology and biotechnology
+  - name: Rafi Ahmad
+    email: rafi.ahmad@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Biotechnology
+      - name: UiT - The Arctic University of Norway, Tromsø, Norway
+        department: Institute of Clinical Medicine, Faculty of Health Sciences
+  - name: Stian Ellefsen
+    email: stian.ellefsen@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+  - name: Daniel Hammarström*
+    email: daniel.hammarstrom@inn.no
+    affiliation: 
+      - name: University of Inland Norway
+        department: Department of Public Health and Sport Sciences 
+    attributes:
+      corresponding: true
+format: typst
+csl: resources/bmc-bioinformatics.csl
+---
+
+`#v(3em)`{=typst}
+
+### Reviewer comments and author responses
+
+`#strong([Authors response.])`{=typst} We thank the editor and reviewers for once again reviewing our manuscript and making comments and recommendations all aimed at upholding the standard expectation for methodological papers and software packages. We are addressing the reviewers' comments below.
+
+#### Reviewer 1
+
+I appreciate the authors' great effort in preparing this revision. The authors have adequately addressed most of the previous comments. However, I have two additional very minor comments and recommend minor revision:
+
+1.   I just noticed that a suggested reference (Chen 2022, DOI: 10.1371/journal.pone.0276664) appears to be missing from the revised manuscript. I would suggest adding this reference, as it also developed an R package for high-dimensional data, particularly for classification problems.
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for the suggestion. We agree that the suggested reference (Chen 2022, DOI: 10.1371/journal.pone.0276664) is relevant in the context of high-dimensional data analysis tools. However, we note that the reference is a Python-based tool, whereas our manuscript focuses on R-based methods intended for R-based analysis. To maintain conceptual and technical consistency, we included only the R-based packages recommended by the reviewer which helped not just position our package but made the review more comprehensive.
+
+2.   Since the manuscript title contains the term “high-dimensional,” users or readers may naturally expect some form of variable selection. This is why I raised this comment previously.\
+    According to your response, you mentioned that “each target gets its own set of estimates, and selection between targets as features has to be done by the user after model fitting.” Does this imply that informative genes should be pre-determined by the users? I would suggest that the authors clarify this point in the manuscript
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for pointing out the potential for misunderstanding regarding variable selection. To clarify, our package is not designed to perform formal variable selection across predictors. Instead, the package fits a separate model for each target (e.g., gene or protein), and the resulting estimates are returned to the user. This does not require users to pre‑select informative targets; rather, targets can be evaluated and filtered after model fitting based on their estimated effects.
+
+We have revised the manuscript to make this explicit. Additionally, we note that users who wish to perform variable selection on the predictor side may implement custom summary functions (e.g., using stepwise procedures such as `MASS::stepAIC`), but such use‑cases fall outside the central scope of the package. The revised text now appears in .....................................
+
+#### Reviewer 2
+
+Many thanks for considering my previous comments. However, I believe that in order to have a fully reproducible paper, an associated file with the R code to run all the necessary analyses and plots in paper is needed. The authors have provided a supplementary.pdf file with lots of R code chunks. However, this is not suitable for reproducibility as it involves copying and pasting tens of R code chunks.\
+\
+Hence, please provide a single file with R code so that we can reproduce all the examples in the paper. If simulations are used, please use set.seed() before sampling the simulated data. Furthermore, make sure that you comment the R code appropriately so that the different results and plots in the paper can be identified in the code
+
+`#strong([Authors response.])`{=typst} We thank the reviewer for this suggestion regarding reproducibility**.**\
+We agree that providing code in a fully executable form is essential for transparent and reproducible research. In response, we have created a dedicated GitHub repository for the manuscript, which now contains
+
+1.  A single, fully executable Quarto (.qmd) file that contains all the R code chunks to reproduce the analysis in the supplementary document. This allows running the entire workflow from start to finish and avoids copying and pasting code.
+2.  A single, fully executable R script that contains all the codes necessary to reproduce the analysis and figures in the paper. Wherever simulated data are generated, we set seed values using `set.seed(1)` to ensure exact reproducibility.
+3.  A detailed README file that explains step‑by‑step how to reproduce each result, figure, and table from the manuscript, including references to section numbers and figure numbers
+
+Because the simulations used in the paper generate very large data objects, rerunning the simulation from scratch is computationally expensive. To address this while still ensuring full reproducibility:
+
+-   We have deposited the simulation output dataset on [Dataverse](https://dataverse.no/dataverse/inn).
+
+-   For data simulation in the provided R script , an optional flag that automatically downloads the dataset from Dataverse instead of re‑running the entire simulation has been provided. Users who prefer to regenerate the data may do so by setting this flag accordingly; all random processes use `set.seed(1)` to ensure reproducibility.
+
+We have also added comments throughout the R script so users can easily identify which code produces each figure and numerical result in the manuscript.
+
+We believe these additions fully address the reviewer’s helpful suggestions and significantly enhance the reproducibility and transparency of the work.
