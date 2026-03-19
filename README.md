@@ -27,7 +27,7 @@ needed to reproduce the results and figures presented in the
       and executes this file to make the functions and variables in the
       script available in the R environment
 
-  iii\. `m1-m5-pillion-data.R` This file builds ands save the models
+  iii\. `m1-m5-pillion-data.R` This file builds and saves the models
   based on real world data from the [Pillion
   study](https://pubmed.ncbi.nlm.nih.gov/36070371/)
 
@@ -36,29 +36,22 @@ needed to reproduce the results and figures presented in the
   reported in the paper
 
 - `/figures` The R files in this directory reproduces the figures in the
-  paper
-
-  `figure-1.R` reproduces Figure 1
-
-  `figure-2.R` reproduces Figure 2
-
-  `figure-3.R` reproduces Figure 3
-
-  `figure-opts.R` defines the custom color palette used in the figures.
+  paper with `figure-opts.R` defining the custom color palette used in
+  the figures.
 
 ## Reproducing the analysis in the paper
 
 To reproduce the analysis from scratch, we recommend you run the scripts
 in this order
 
-1.  `/R/m1-m5-pillion-data.R` Would reproduce the case study analysis
+1.  `/R/m1-m5-pillion-data.R` To reproduce the case study analysis
 
-2.  `/R/make-sims.R` Would reproduce the simulation data and analysis
+2.  `/R/make-sims.R` To reproduce the simulation data and analysis
 
-3.  `supplement.qmd` Would reproduce the supplementary file
+3.  `supplement.qmd` To reproduce the supplementary file
 
-4.  `/figures/figure-1.R` Would reproduce Figure 1
+4.  `/figures/figure-2.R` Would reproduce Figure 2
 
-5.  `/figures/figure-2.R` Would reproduce Figure 2
+5.  `/figures/figure-3.R` Would reproduce Figure 3
 
-6.  `/figures/figure-3.R` Would reproduce Figure 3
+6.  `/figures/figure-4.R` Would reproduce Figure 3
