@@ -39,7 +39,7 @@ needed to reproduce the results and figures presented in the
   paper with `figure-opts.R` defining the custom color palette used in
   the figures.
 
-## Reproducing the analysis in the article
+## Reproducing the results and figures in the article
 
 To reproduce the analysis from scratch, we recommend you run the scripts
 in this order
