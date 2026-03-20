@@ -5,11 +5,15 @@ format: gfm
 
 ## Introduction
 
-This repository contains details of the relevant files, data and code needed to reproduce the results and figures presented in the [seqwrap](https://github.com/trainome/seqwrap) paper.
+This repository contains all relevant code to reproduce the results presented in the paper reproduce the results and figures presented in the *"seqwrap: an R package for flexible iterative fitting of high-dimensional data"* (in review). The paper presents the  [seqwrap](https://github.com/trainome/seqwrap) package which is designed for analysis of omic-type (e.g., RNA-seq, proteomics, etc.) with user-defined regression models.
 
-## Relevant files and folders
+### Repository structure and content
 
--   `supplement.qmd` Running this file reproduces the supplementary documents including the tables and figures therein
+-   `supplement.qmd` Running this file reproduces the supplementary document (supplement.pdf), including the tables and figures therein. 
+
+- `supplement.R` is a sourcable version of the quarto file (`supplement.qmd`).
+
+- `manuscript-docx-v3.qmd` 
 
 -   `/R` This directory contains the scripts used to produce the results present in the paper. Below are short descriptions of what each file does
 
