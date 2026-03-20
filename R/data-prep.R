@@ -1,4 +1,3 @@
-
 ################################################################################
 # Prepare observed data for simulations
 #
@@ -9,10 +8,11 @@
 # ------------------------------
 # 04. Load data
 #
+# Notes: Results from model m1 is used to generate simulated data, i.e. it must
+# be present to sun the simulation script. The script checks if m1 is available,
+# otherwise it re-runs the estimations process (time-consuming).
 #
 ################################################################################
-
-
 
 # 01. Packages ################################################################
 library(seqwraphelper)
@@ -24,55 +24,49 @@ library(edgeR)
 library(DESeq2)
 
 
-
 # 02. Download and prep data #################################################
 
+if (!dir.exists("data/")) dir.create("data/")
 
-if(!dir.exists("data/")) dir.create("data/")
-
-if(!file.exists("data/m1_results.RDS")) {
-
-  dat <- seqwraphelper::geo_data(gse = "GSE202295")
-  all(dat$metadata$seq_sample_id == colnames(dat$countdata[,-1]))
-
-
+if (!file.exists("data/m1_results.RDS")) {
+  dat <- seqwrap::pillon_counts
+  all(dat$metadata$seq_sample_id == colnames(dat$countdata[, -1]))
 
   # Combine all gene counts after filtering
   keep <- filterByExpr(
-    dat$countdata[,-1],
+    dat$countdata[, -1],
     min.count = 10,
     min.total.count = 15,
     large.n = 10,
     min.prop = 0.7,
-    group = paste(dat$metadata$group, dat$metadata$time))
+    group = paste(dat$metadata$group, dat$metadata$time)
+  )
 
-  countdat <-  dat$countdata[keep,]
-
+  countdat <- dat$countdata[keep, ]
 
   # Use EdgeR to calculate the TMM
-  y <- edgeR::DGEList(countdat[,-1])
+  y <- edgeR::DGEList(countdat[, -1])
   y <- edgeR::calcNormFactors(y)
 
   # Store library sizes
   libsize <- y$samples |>
     rownames_to_column(var = "seq_sample_id") |>
-    select(- group)
+    select(-group)
 
   # Combine all meta data
   metadat <- dat$metadata |>
     inner_join(libsize, by = "seq_sample_id") |>
-    mutate(group = factor(group, levels = c("NGT", "T2D")),
-           time = factor(time, levels = c("basal", "post", "rec")),
-           efflibsize = (lib.size * norm.factors) /
-             median(lib.size * norm.factors),
-           ln_efflibsize = log(efflibsize))
+    mutate(
+      group = factor(group, levels = c("NGT", "T2D")),
+      time = factor(time, levels = c("basal", "post", "rec")),
+      efflibsize = (lib.size * norm.factors) /
+        median(lib.size * norm.factors),
+      ln_efflibsize = log(efflibsize)
+    )
 
   # Calculate observed library sizes
-  observed_mean_libsize <- mean(libsize$lib.size)/20
+  observed_mean_libsize <- mean(libsize$lib.size) / 20
   observed_cv_libsize <- sd(libsize$lib.size) / mean(libsize$lib.size)
-
-
-
 
   # 03. A preliminary model #####################################################
 
@@ -80,22 +74,18 @@ if(!file.exists("data/m1_results.RDS")) {
   # The purpose of the conditional model is to estimate distributions
   # of parameter estimates. We will use these for simulations
 
-
   # A summary function to return the dispersion parameter with SE on the log scale
   # mean(predict(x, type = "link)) will give us the predicted log counts.
   # We will put this in the eval fun to also get estimates of the parameters in
   # the generic summary function.
   sigma_summary <- function(x) {
-
-    out <- data.frame(dispersion =  data.frame(summary(x$sdr))["betadisp",1],
-                      dispersion.se = data.frame(summary(x$sdr))["betadisp",2],
-                      log_mu = mean(predict(x, type = "link")))
+    out <- data.frame(
+      dispersion = data.frame(summary(x$sdr))["betadisp", 1],
+      dispersion.se = data.frame(summary(x$sdr))["betadisp", 2],
+      log_mu = mean(predict(x, type = "link"))
+    )
     return(out)
-
   }
-
-
-
 
   m1 <- seqwrap_compose(
     data = countdat,
@@ -104,14 +94,17 @@ if(!file.exists("data/m1_results.RDS")) {
     modelfun = glmmTMB,
     eval_fun = sigma_summary,
     arguments = list(
-      formula = y ~ time * group + offset(ln_efflibsize) + (1|id),
-      family = glmmTMB::nbinom2)
+      formula = y ~ time * group + offset(ln_efflibsize) + (1 | id),
+      family = glmmTMB::nbinom2
+    )
   )
 
-  m1_results <- seqwrap(m1,
-                        return_models = FALSE,
+  m1_results <- seqwrap(
+    m1,
+    return_models = FALSE,
 
-                        cores = parallel::detectCores())
+    cores = parallel::detectCores()
+  )
   saveRDS(m1_results, "data/m1_results.RDS")
 }
 
@@ -130,41 +123,43 @@ dispersion_dat <- m1_sum$evaluations
 # Fit a loess model, this model can be used in the
 # simulation function to represent the mean-dispersion
 # relationship
-trend_model_observed <- loess(dispersion ~ log_mu,
-                              data = dispersion_dat,
-                              span = 0.7,
-                              weights = 1/(dispersion.se^2))
+trend_model_observed <- loess(
+  dispersion ~ log_mu,
+  data = dispersion_dat,
+  span = 0.7,
+  weights = 1 / (dispersion.se^2)
+)
 
-trend_model_observed_noweights <- loess(dispersion ~ log_mu,
-                              data = dispersion_dat,
-                              span = 0.7)
+trend_model_observed_noweights <- loess(
+  dispersion ~ log_mu,
+  data = dispersion_dat,
+  span = 0.7
+)
 
 
-new_data <-  data.frame(log_mu = seq(from = 0,
-                                     to = 14,
-                                     by = 0.1))
-
+new_data <- data.frame(log_mu = seq(from = 0, to = 14, by = 0.1))
 
 
 # Trend model predictions
-dispersion_pred <-  data.frame(log_mu = seq(from = 0, to = 14, by = 0.1),
-                               pred = predict(trend_model_observed,
-                                              newdata = new_data)) |>
+dispersion_pred <- data.frame(
+  log_mu = seq(from = 0, to = 14, by = 0.1),
+  pred = predict(trend_model_observed, newdata = new_data)
+) |>
   mutate(sd = trend_model_observed$s)
 
 
 # # Check the dispersion fit
- dispersion_dat |>
-   ggplot(aes(log_mu, dispersion)) +
-   geom_point(alpha = 0.2) +
+dispersion_dat |>
+  ggplot(aes(log_mu, dispersion)) +
+  geom_point(alpha = 0.2) +
 
-   geom_ribbon(data = dispersion_pred,
-               aes(log_mu, pred, ymin = pred - sd,
-                   ymax = pred + sd),
-               alpha = 0.2) +
+  geom_ribbon(
+    data = dispersion_pred,
+    aes(log_mu, pred, ymin = pred - sd, ymax = pred + sd),
+    alpha = 0.2
+  ) +
 
-   geom_line(data = dispersion_pred,
-             aes(log_mu, pred), color = "red")
+  geom_line(data = dispersion_pred, aes(log_mu, pred), color = "red")
 
 # # Overall distributions of observed effects
 # m1_sum$summaries |>

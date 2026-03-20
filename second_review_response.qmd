@@ -30,7 +30,7 @@ bibliography: resources/bibliography.bib
 csl: resources/bmc-bioinformatics.csl
 ---
 
-`#v(3em)`{=typst}
+`#v(5em)`{=typst}
 
 ### Editor's comments and authors' responses
 `#strong([Authors response.])`{=typst} 
@@ -79,7 +79,7 @@ We hope this explanation clarifies our rationale, and we remain open to further 
 
 1.   *I just noticed that a suggested reference (Chen 2022, DOI: 10.1371/journal.pone.0276664) appears to be missing from the revised manuscript. I would suggest adding this reference, as it also developed an R package for high-dimensional data, particularly for classification problems.*
 
-`#strong([Authors response.])`{=typst} We thank the reviewer for the suggestion. We agree that the suggested reference (Chen 2022, DOI: 10.1371/journal.pone.0276664) is relevant in the context of high-dimensional data analysis tools. However, we note that the reference is a Python-based tool, whereas our manuscript focuses on R-based methods intended for R-based analysis. To maintain conceptual and technical consistency, we included only the R-based packages recommended by the reviewer which helped not just position our package but made the review more comprehensive. We have added a note to highlight that the general discussion concerns examples from the R ecosystem.
+`#strong([Authors response.])`{=typst} We thank the reviewer for the suggestion. We agree that the suggested reference (Chen 2022, DOI: 10.1371/journal.pone.0276664) is relevant in the context of high-dimensional data analysis tools. However, we note that the reference is a Python-based tool, whereas our manuscript focuses on R-based methods intended for R-based analysis. To maintain conceptual and technical consistency, we included only the R-based packages recommended by the reviewer which helped not just position our package but made the review more comprehensive. We have added a note to highlight (in the introduction) that the general discussion concerns examples from the R ecosystem.
 
 2. *Since the manuscript title contains the term "high-dimensional," users or readers may naturally expect some form of variable selection. This is why I raised this comment previously.
     According to your response, you mentioned that "each target gets its own set of estimates, and selection between targets as features has to be done by the user after model fitting." Does this imply that informative genes should be pre-determined by the users? I would suggest that the authors clarify this point in the manuscript.*
