@@ -176,8 +176,8 @@ $$
 Y_{g[i,j]} &\sim \operatorname{Poisson}(\lambda_{g[i,j]}) \\
 \operatorname{log}(\lambda_{g[i,j]}) &= \eta_{g[i,j]} \\
 \eta_{g[i,j]} &= \mathbf{X}_{i} \boldsymbol{\beta}_g + \operatorname{log}(\text{s}_i) + b_{0[j]} + b_{0[i]}  \\
-b_{0[j]} &\sim \operatorname{Normal}(0, \sigma_{g[j]}) \\
-b_{0[i]} &\sim \operatorname{Normal}(0, \sigma_{g[i]})
+b_{0[j]} &\sim \operatorname{Normal}(0, \sigma_{g[\text{participants}]}) \\
+b_{0[i]} &\sim \operatorname{Normal}(0, \sigma_{g[\text{observations}]})
 \end{align}
 $$ {#eq-model-2}
 
@@ -413,7 +413,7 @@ Not applicable
 
 #### Availability of data and materials
 
-[All data presented in the paper (and supplementary material) are openly available (Pillon et al ., [@pillon2022], GSE202295; Dungan et al. [@dungan2022], GSE195707). The code for the simulation study is available at https://github.com/trainome/seqwrap-paper. Simulation results can be replicated using code provided in the repository https://github.com/trainome/seqwrap-paper, simulated data sets and results can also be downloaded from DataverseNO: Chidimma Echebiri, Stian Ellefsen, Rafi Ahmad, and Daniel Hammarstr&ouml;m. 2026. “Simulated Data Sets for: Seqwrap: An R Package for Flexible Iterative Fitting of High-Dimensional Data.” DataverseNO. https://doi.org/doi:10.18710/I7U71O.]{custom-style="edits"}
+[All data presented in the paper (and supplementary material) are openly available (Pillon et al ., [@pillon2022], GSE202295; Dungan et al. [@dungan2022], GSE195707). The code for the simulation study is available at https://github.com/trainome/seqwrap-paper. Simulation results can be replicated using code provided in the repository https://github.com/trainome/seqwrap-paper. Simulated data sets and results can also be downloaded from DataverseNO: Chidimma Echebiri, Stian Ellefsen, Rafi Ahmad, and Daniel Hammarstr&ouml;m. 2026. “Simulated Data Sets for: Seqwrap: An R Package for Flexible Iterative Fitting of High-Dimensional Data.” DataverseNO. https://doi.org/doi:10.18710/I7U71O.]{custom-style="edits"}
 
 
 #### Competing interests
