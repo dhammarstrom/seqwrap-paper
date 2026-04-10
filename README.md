@@ -32,6 +32,14 @@ simulated data and estimates*”).
 
 ### Repository structure and content
 
+The script `R/make-docs.R` executes scripts in the required order to
+reproduce results presented in the manuscript and supplementary file.
+The script starts by restoring the package environment used to produce
+the submitted manuscript using
+[renv](https://rstudio.github.io/renv/index.html). Activating the
+package environment used to produce the manuscript is done using
+`renv::restore()` (see `R/make-docs.R`)
+
 #### Source files for docs and images
 
 - `supplement.qmd` Running this file reproduces the supplementary
@@ -97,21 +105,14 @@ To reproduce the analysis from scratch, we recommend you run the scripts
 in this order.
 
 1.  `data-prep.R`
-
 2.  `/R/m1-m5-pillion-data.R` To reproduce the case study analysis
-
 3.  `/R/make-sims.R` (or download data, see below) To reproduce the
     simulation data and analysis
-
 4.  `/figures/figure-2.R` Will reproduce Figure 2
-
 5.  `/figures/figure-3.R` Will reproduce Figure 3
-
 6.  `/figures/figure-4.R` Will reproduce Figure 4
-
-7.  `manuscript-docx-v3.qmd` Reproduces the manuscript file.
-
-8.  `supplement.qmd` Reproduces the supplemental information file.
+7.  `supplement.qmd` Reproduces the supplemental information file.
+8.  `manuscript-docx-v3.qmd` Reproduces the manuscript file.
 
 ## Downloading simulated data and estimates
 
