@@ -1212,7 +1212,11 @@ true_effects <- bind_rows(sim_results$populationeffects,
   summarise(.by = c(term, dataset, size, disp_scenario, effect), 
             n = n()) 
 
-# Savining for manuscript
+
+# Check if data-out is a folder
+if(!dir.exists("data-out")) dir.create("data-out")
+
+# Saving for manuscript
 saveRDS(true_effects, "data-out/true_effects.RDS")
 
 # Combine all true/false effects
