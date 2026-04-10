@@ -12,6 +12,7 @@
 cran_pkgs <- c(
   "DHARMa",
   "cowplot",
+  "ComplexUpset",
   "dplyr",
   "ggplot2",
   "ggtext",
@@ -37,7 +38,7 @@ if (length(cran_missing) > 0) {
 
 # Required Bioconductor packages
 
-bioc_pkgs <- c("DESeq2", "edgeR")
+bioc_pkgs <- c("DESeq2", "edgeR", "clusterProfiler", "org.Hs.eg.db")
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
