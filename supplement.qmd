@@ -40,8 +40,9 @@ execute:
 
 ## Installing `seqwrap`
 
+
 ```{r}
-#| label: check-packages
+#| label: check-packages-dependencies
 #| echo: false
 #| message: false
 #| warning: false
@@ -50,9 +51,15 @@ execute:
 # Being able to re-produce this document requires a set of packages. 
 source("R/check-packages.R")
 
+# Output needed for the figures are created in data.prep.R and 
+# m1-m5-pillon.R
+source("R/data-prep.R")
+## Only needed if output data is missong
+if(!file.exists("data-out/pillon-models.RDS")) {
+  source("R/m1-m5-pillon-data.R")
+}
+
 ```
-
-
 
 
 `seqwrap` version 0.6.1 is available from GitHub. To install `seqwrap`: 
@@ -1590,6 +1597,9 @@ est |>
 
 library(gt)
 library(stringr)
+
+# To get the gsea results we need to run the figure 4 script
+if(!file.exists("data-out/gsea_results.RDS")) source("figures/figure4.R")
 
 gsea_results <- readRDS("data-out/gsea_results.RDS")
 

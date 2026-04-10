@@ -36,6 +36,7 @@ source("R/simulation-functions.R")
 
 # Check if the data folder exists
 if (!dir.exists("data/")) dir.create("data/")
+if (!dir.exists("data-out/")) dir.create("data-out/")
 
 
 dat <- seqwrap::pillon_counts

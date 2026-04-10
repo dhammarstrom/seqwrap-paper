@@ -151,18 +151,18 @@ dispersion_pred <- data.frame(
 
 
 # # Check the dispersion fit
-dispersion_dat |>
-  ggplot(aes(log_mu, dispersion)) +
-  geom_point(alpha = 0.2) +
-
-  geom_ribbon(
-    data = dispersion_pred,
-    aes(log_mu, pred, ymin = pred - sd, ymax = pred + sd),
-    alpha = 0.2
-  ) +
-
-  geom_line(data = dispersion_pred, aes(log_mu, pred), color = "red")
-
+# dispersion_dat |>
+#   ggplot(aes(log_mu, dispersion)) +
+#   geom_point(alpha = 0.2) +
+#
+#   geom_ribbon(
+#     data = dispersion_pred,
+#     aes(log_mu, pred, ymin = pred - sd, ymax = pred + sd),
+#     alpha = 0.2
+#   ) +
+#
+#   geom_line(data = dispersion_pred, aes(log_mu, pred), color = "red")
+#
 # # Overall distributions of observed effects
 # m1_sum$summaries |>
 #   ggplot(aes(estimate)) +
@@ -175,3 +175,7 @@ dispersion_dat |>
 #   summarise(m = mean(log(estimate)),
 #             s = sd(log(estimate)))
 #
+
+# Clean up
+rm("m1_results")
+rm("m1_sum")

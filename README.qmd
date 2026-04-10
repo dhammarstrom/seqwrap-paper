@@ -22,6 +22,8 @@ The paper presents results from simulations defined in `simulations.R` and `simu
 
 ### Repository structure and content
 
+The script `R/make-docs.R` executes scripts in the required order to reproduce results presented in the manuscript and supplementary file.
+
 #### Source files for docs and images
 
 -   `supplement.qmd` Running this file reproduces the supplementary document (supplement.pdf), including the tables and figures therein. 
