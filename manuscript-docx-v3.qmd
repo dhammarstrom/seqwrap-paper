@@ -31,10 +31,7 @@ format:
 csl: resources/bmc-bioinformatics.csl
 bibliography: resources/bibliography.bib
 abstract: |
-  
-  
-execute: 
-  cache: true
+
 editor_options: 
   chunk_output_type: console
 ---

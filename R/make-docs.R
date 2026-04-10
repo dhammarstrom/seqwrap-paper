@@ -14,6 +14,9 @@
 #
 ##############################################################################
 
+# Retore package versions
+renv::restore()
+
 # Re-run simulations?
 make_sim <- FALSE
 

@@ -31,15 +31,17 @@ format:
           v(2em)  // Add vertical space before TOC
           it
         }
-        
 csl: resources/bmc-bioinformatics.csl
 bibliography: resources/bibliography.bib
-execute: 
-  cache: true
+editor_options: 
+  chunk_output_type: console
 ---
 
-## Installing `seqwrap`
 
+
+
+
+## Installing `seqwrap`
 
 ```{r}
 #| label: check-packages-dependencies
@@ -60,6 +62,8 @@ if(!file.exists("data-out/pillon-models.RDS")) {
 }
 
 ```
+
+
 
 
 `seqwrap` version 0.6.1 is available from GitHub. To install `seqwrap`: 
@@ -1126,9 +1130,11 @@ Below follows supplementary results from the simulation study presented in the m
 
 
 
-library(cowplot)
 
+
+library(cowplot)
 source("figures/figure-opts.R")
+
 
 ## Load data from simulations
 source("R/simulation-functions.R")
@@ -1219,11 +1225,11 @@ true_effects <- bind_rows(sim_results$populationeffects,
   summarise(.by = c(term, dataset, size, disp_scenario, effect), 
             n = n()) 
 
+# Savining for manuscript
 
 # Check if data-out is a folder
 if(!dir.exists("data-out")) dir.create("data-out")
 
-# Saving for manuscript
 saveRDS(true_effects, "data-out/true_effects.RDS")
 
 # Combine all true/false effects
@@ -1241,7 +1247,7 @@ est <- est_temp |>
     bind_rows(sim_results$populationeffects, 
               sim_results2$populationeffects) |>
                mutate(target = as.character(target)) |>
-               select(-file)) |>
+               dplyr::select(-file)) |>
 
   dplyr::select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
 
@@ -1293,8 +1299,8 @@ convergence_stats <- bind_rows(sim_results$evaluations,
             conv = sum(conv),
             conv.nonstrict = sum(conv.nonstrict),
             ntotal = mean(ntotal)) 
-  
-  
+# Save for manuscript  
+saveRDS(convergence_stats, "data-out/covergence_stats.RDS")  
 
 ```
 
@@ -1598,6 +1604,7 @@ est |>
 library(gt)
 library(stringr)
 
+
 # To get the gsea results we need to run the figure 4 script
 if(!file.exists("data-out/gsea_results.RDS")) source("figures/figure4.R")
 
@@ -1710,8 +1717,10 @@ md <- dat$metadata
 
 md$libsize <- log(colSums(d[,-1]))
 
-size <- c(62, 125, 250, 500, 1000)
-cores <- c(62, 10, 10, 10, 10)
+available_cores <- parallel::detectCores()
+
+size <- c(62, 125, 250, 500)
+cores <- c(2, available_cores, available_cores, available_cores)
 
 time_results <- data.frame(size = size, 
                       mod1 = rep(NA, length(size)), 

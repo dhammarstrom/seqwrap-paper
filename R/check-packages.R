@@ -12,7 +12,7 @@
 cran_pkgs <- c(
   "DHARMa",
   "cowplot",
-  "ComplexUpset",
+  "renv",
   "dplyr",
   "ggplot2",
   "ggtext",
@@ -52,7 +52,12 @@ if (length(bioc_missing) > 0) {
 
 # GitHub packages
 
-github_pkgs <- c("seqwrap", "seqwraphelper", "lmerSeq", "glmmSeq")
+github_pkgs <- c(
+  "seqwrap",
+  "lmerSeq",
+  "glmmSeq",
+  "ComplexUpset"
+)
 
 if (!requireNamespace("remotes", quietly = TRUE)) {
   install.packages("remotes")
@@ -70,6 +75,10 @@ if (!requireNamespace("lmerSeq", quietly = TRUE)) {
 
 if (!requireNamespace("glmmSeq", quietly = TRUE)) {
   remotes::install_github("myles-lewis/glmmSeq")
+}
+
+if (!requireNamespace("ComplexUpset", quietly = TRUE)) {
+  remotes::install_github("krassowski/complex-upset")
 }
 
 

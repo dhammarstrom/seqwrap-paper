@@ -38,7 +38,6 @@ source("R/simulation-functions.R")
 if (!dir.exists("data/")) dir.create("data/")
 if (!dir.exists("data-out/")) dir.create("data-out/")
 
-
 dat <- seqwrap::pillon_counts
 all(dat$metadata$seq_sample_id == colnames(dat$countdata[, -1]))
 
@@ -318,7 +317,6 @@ if (!file.exists("data/m2_results.RDS")) {
 }
 
 m2_results <- readRDS("data/m2_results.RDS")
-
 # 07. Model 3 - Gaussian on transformed counts ################################
 
 dds <- DESeqDataSetFromMatrix(
