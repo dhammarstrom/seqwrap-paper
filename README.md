@@ -23,9 +23,16 @@ fitting of high-dimensional data”* (in review). The paper presents the
 analysis of omic-type (e.g., RNA-seq, proteomics) data using
 user-defined regression models.
 
+The paper presents results from simulations defined in `simulations.R`
+and `simulations2.R` (see below). Since running the simulations is
+time-consuming, results can be downloaded from Dataverse
+(https://doi.org/10.18710/I7U71O) to this folder to enable direct
+reproducibility of the results (see instructions below, “*Downloading
+simulated data and estimates*”).
+
 ### Repository structure and content
 
-#### Source files for docs
+#### Source files for docs and images
 
 - `supplement.qmd` Running this file reproduces the supplementary
   document (supplement.pdf), including the tables and figures therein.
@@ -35,6 +42,9 @@ user-defined regression models.
 
 - `manuscript-docx-v3.qmd` Contains the manuscript, with relevant code
   for presenting results.
+
+- `img/overview.svg` contains the raw `.svg` file used to create Figure
+  1.
 
 #### Scripts
 
@@ -47,7 +57,7 @@ user-defined regression models.
       (available as part of the seqwrap package). If estimates are
       available, the script loads the data and prepares a model for the
       mean-dispersion relationship based on the data used to generate
-      simulated counts.
+      simulated counts. The output is stored in `/data/m1_results.RDS`
 
   2.  `simulation-functions.R` Contains R functions used at different
       points of the analysis, such as the function to simulate data sets
@@ -71,6 +81,12 @@ user-defined regression models.
   paper with `figure-opts.R` defining the custom color palette used in
   the figures. Figure R files 2-4 require results from `data-prep.R`,
   `m1-m5-pillon-data.R`, and `make-sims.R`.
+
+#### Misc
+
+- `/resources/` contains helper files for generating the manuscript
+  (`bibliography.bib` and .csl file).
+- `/archive/` contains older version of source files and scripts.
 
 ## Reproducing the results and figures in the article
 

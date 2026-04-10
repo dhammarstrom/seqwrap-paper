@@ -17,6 +17,9 @@ author: Chidimma Echebiri^1,2^  Rafi Ahmad^1,3^ Stian Ellefsen^2^ Daniel Hammars
 
 This repository contains all relevant code to reproduce the results presented in the paper *"seqwrap: an R package for flexible iterative fitting of high-dimensional data"* (in review). The paper presents the [seqwrap](https://github.com/trainome/seqwrap) package, designed for the analysis of omic-type (e.g., RNA-seq, proteomics) data using user-defined regression models.
 
+The paper presents results from simulations defined in `simulations.R` and `simulations2.R` (see below). Since running the simulations is time-consuming, results can be downloaded from Dataverse (https://doi.org/10.18710/I7U71O) to this folder to enable direct reproducibility of the results (see instructions below, "*Downloading simulated data and estimates*").
+
+
 ### Repository structure and content
 
 #### Source files for docs and images
