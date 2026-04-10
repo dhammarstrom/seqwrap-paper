@@ -1,7 +1,7 @@
 ############################################################################
 # Check that all required packages are installed to run the repository.
 #
-# Note. seqwrap
+#
 #
 #
 #
