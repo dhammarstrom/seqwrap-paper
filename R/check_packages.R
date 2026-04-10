@@ -1,0 +1,68 @@
+
+
+
+# Required CRAN packages
+
+cran_pkgs <- c(
+  "DHARMa", "cowplot", "dplyr", "ggplot2", "ggtext", "glmmTMB",
+  "gt", "knitr", "lme4", "lmerTest", "parallel", "purrr",
+  "rmarkdown", "stats", "stringr", "tibble", "tidyverse"
+)
+
+cran_missing <- setdiff(cran_pkgs, rownames(installed.packages()))
+if (length(cran_missing) > 0) {
+  install.packages(cran_missing, dependencies = TRUE)
+}
+
+
+# Required Bioconductor packages
+
+bioc_pkgs <- c("DESeq2", "edgeR")
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+bioc_missing <- setdiff(bioc_pkgs, rownames(installed.packages()))
+if (length(bioc_missing) > 0) {
+  BiocManager::install(bioc_missing, ask = FALSE, update = FALSE)
+}
+
+
+# GitHub packages
+
+github_pkgs <- c("seqwrap", "seqwraphelper", "lmerSeq", "glmmSeq")
+
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+
+if (!requireNamespace("seqwrap", quietly = TRUE)) {
+  remotes::install_github("chidimmae/seqwrap")
+}
+
+if (!requireNamespace("seqwraphelper", quietly = TRUE)) {
+  remotes::install_github("dhammarstrom/seqwraphelper")
+}
+
+if (!requireNamespace("lmerSeq", quietly = TRUE)) {
+  remotes::install_github("stop-pre16/lmerSeq")
+}
+
+if (!requireNamespace("glmmSeq", quietly = TRUE)) {
+  remotes::install_github("myles-lewis/glmmSeq")
+}
+
+
+# Final check
+
+all_pkgs <- c(cran_pkgs, bioc_pkgs, github_pkgs)
+missing <- setdiff(all_pkgs, rownames(installed.packages()))
+
+if (length(missing) > 0) {
+  stop("The following packages are still missing: ",
+       paste(missing, collapse = ", "),
+       call. = FALSE)
+} else {
+  message("✅ All required packages are installed.")
+}
