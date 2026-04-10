@@ -51,6 +51,9 @@ simulated data and estimates*”).
 - `/R` This directory contains the scripts used to produce the results
   presented in the paper.
 
+  0.  `check-packages.R` This script checks that all packages needed for
+      running the analyses in the repository are installed.
+
   1.  `data-prep.R` The script prepares data and fits a preliminary
       model to the [Pillion
       study](https://pubmed.ncbi.nlm.nih.gov/36070371/) data set
