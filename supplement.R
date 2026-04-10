@@ -1,69 +1,32 @@
-#' ---
-#' title: "seqwrap: an R package for flexible iterative fitting of high-dimensional data"
-#' subtitle: "Supplementary material"
-#' author:
-#'   - name: Chidimma Echebiri
-#'     affiliation:
-#'       - name: University of Inland Norway
-#'         department: Department of Biotechnology, PhD programme in applied ecology and biotechnology
-#'   - name: Rafi Ahmad
-#'     affiliation: 
-#'       - name: University of Inland Norway
-#'         department: Department of Biotechnology
-#'   - name: Stian Ellefsen
-#'     affiliation: 
-#'       - name: University of Inland Norway
-#'         department: Department of Public Health and Sport Sciences 
-#'   - name: Daniel Hammarström
-#'     email: daniel.hammarstrom@inn.no
-#'     affiliation: 
-#'       - name: University of Inland Norway
-#'         department: Department of Public Health and Sport Sciences 
-#'     attributes:
-#'       corresponding: true
-#' format:
-#'   typst:
-#'     toc: true
-#'     include-in-header:
-#'       text: |
-#'         #show figure.caption: set text(size: 9pt)
-#'         #show outline: it => {
-#'           v(2em)  // Add vertical space before TOC
-#'           it
-#'         }
-#'         
-#' csl: resources/bmc-bioinformatics.csl
-#' bibliography: resources/bibliography.bib
-#' execute: 
-#'   cache: true
-#' ---
-#' 
-#' ## Installing `seqwrap`
-#' 
-#' `seqwrap` version 0.6.0 is available from GitHub. To install `seqwrap`: 
-#' 
-## --------------------------------------------------------
-#| eval: false
+#| label: check-packages-dependencies
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
 
+# Being able to re-produce this document requires a set of packages. 
+source("R/check-packages.R")
+
+# Output needed for the figures are created in data.prep.R and 
+# m1-m5-pillon.R
+source("R/data-prep.R")
+## Only needed if output data is missong
+if(!file.exists("data-out/pillon-models.RDS")) {
+  source("R/m1-m5-pillon-data.R")
+}
+
+
+#| eval: false
+# 
 # # Installing from GitHub requires remotes
 # # install.packages("remotes")
 # 
 # remotes::install_github("trainome/seqwrap")
 # 
 
-#' 
-#' 
-#' ## Fitting models with `seqwrap`
-#' 
-#' The `seqwrap` package is designed to iterate over multiple targets in a high-dimensional data set to fit a user-defined regression model using a user-selected model fitting function. Each target may represent, e.g., a gene, an exon, a protein, a methylation site, or any other outcome from a high-throughput omics platform. Each target is measured across a set of samples, with a metadata set used to describe study covariates. In the basic case, data and metadata are combined in each iteration to fit the selected model. 
-#' 
-#' Dungan et al. [@dungan2022] evaluated a senolytic treatment (dasatinib and quercetin) in mouse skeletal muscle subjected to mechanical overload through synergist ablation. The study included sham surgery and a vehicle control, allowing analysis of the effect of senolytic treatment and the interaction between mechanical overloading and senolytic treatment. RNA-seq was performed on 20 animals (5 per group). The data are available in the `seqwrap` package under `dungan_counts`. We will load the data and filter low-expression genes.
-#' 
-#' 
-## --------------------------------------------------------
-#| labels: packages-and-data 
 #| message: false
 #| warning: false
+#| labels: packages-and-data
 
 # Load packages
 library(tidyverse)
@@ -78,15 +41,11 @@ metadata <- dungan_counts$metadata
 counts <- dungan_counts$countdata
 
 
-#' 
-#' The metadata contains the sample ID corresponding to columns in the counts data set. We are using `seq_sample_id` as the column name here. The first rows of the prepared metadata are displayed in @tbl-meta-dungan.
-#' 
-## --------------------------------------------------------
+#| label: tbl-meta-dungan
 #| echo: false
 #| message: false
 #| warning: false
-#| label: tbl-meta-dungan
-#| tbl-cap: "Selected rows from the Dungan et al. metadata data frame."
+#| tbl-cap: Selected rows from the Dungan et al. metadata data frame.
 
 
 metadata |> 
@@ -100,15 +59,11 @@ samples <- metadata |>
   pull(seq_sample_id)
 
 
-#' 
-#' The count data matrix can be manipulated as a data frame, with the first column indicating the targets (in this case, gene symbols). Importantly, additional column names have names corresponding to the `seq_sample_id` variable in the metadata. As an example, the first rows of the count data frame are shown for the same samples as in the metadata data frame (see @tbl-dungan-counts). `seqwrap` expects that targets are unique so before going further we should validate this in the data. When doing so we find that five targets have duplicate rows in the data set, for simplicity, we will remove them.   
-#' 
-## --------------------------------------------------------
+#| label: tbl-dungan-counts
 #| echo: false
 #| message: false
 #| warning: false
-#| label: tbl-dungan-counts
-#| tbl-cap: "Selected rows from the Dungan et al. counts data frame."
+#| tbl-cap: Selected rows from the Dungan et al. counts data frame.
 
 counts |> 
   slice_head(n = 10) |> 
@@ -117,10 +72,7 @@ counts |>
   opt_table_font(size = 12)
 
 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
+
 
 # Find targets with more than a unique row in the data
 rm_targets <- counts |> 
@@ -134,29 +86,13 @@ counts <- counts |>
   filter(!(gene_name %in% rm_targets))
 
 
-#' 
-#' 
-## --------------------------------------------------------
 #| echo: false
 
 # Count the number of targets
 n_genes <- nrow(counts)
 
 
-#' 
-#' The data suggests a negative binomial model where the linear predictor can be used to assess the difference between senolytic treatment and control (treat; $\beta_1g$), mechanical overloading compared to sham surgery (mov; $\beta_2g$), and their interaction ($\beta_3g$) for gene *g* in 1 to `r n_genes` and row *i* in 1 to 20 of the meta data (@eq-m1). We want to control for differences in sequencing depth by including an offset (*s*~i~). We will use the TMM method [@robinson2010] to calculate the effective library size.
-#' 
-#' 
-#' $$
-#' \begin{align}
-#' y_{g[i]} &\sim \operatorname{NB2}(\mu_{g[i]}, \theta_g) \\
-#' \operatorname{log}(\mu_{g[i]}) &= \beta_0 + \beta_{1g}\text{treat}_i + \beta_{2g}\text{mov}_i + \beta_{3g}(\text{treat}_i \times  \text{mov}_i) + \operatorname{log}(s_i)
-#' \end{align}
-#' $$ {#eq-m1}
-#' 
-#' Below, we are using the `edgeR` package to calculate the library size normalization factor. Effective library sizes are then expressed as relative to the median effective library and log transformed.
-#' 
-## --------------------------------------------------------
+
 
 # Use EdgeR to calculate the TMM
 y <- edgeR::DGEList(counts[,-1])
@@ -175,14 +111,7 @@ metadata <- metadata |>
 
 
 
-#' 
-#' 
-#' `seqwrap_compose` is used to combine the data, metadata and the selected modelling function with its arguments into a `swobject`. A negative binomial model can be fitted using e.g., `glmmTMB` from the `glmmTMB package (glmmTMB::glmmTMB`) or `MASS::glm.nb`, here we will use `glmmTMB` as it can be extended in subsequent modelling steps. 
-#' 
-#' The specified `glmmTMB` function (`modelfun` slot) needs a formula and a family function, these are supplied in the arguments slot. The count data are supplied in the `data` slot and the metadata in the `metadata` slot.  Notice that we use the namespace operator (`::`) to specify selected functions to avoid difficulties in parallel processing. The `samplename` indicates the column name in the metadata that gives sample names.   
-#' 
-#' 
-## --------------------------------------------------------
+
 
 m1.1 <- seqwrap_compose(
   modelfun = glmmTMB::glmmTMB,
@@ -194,10 +123,7 @@ m1.1 <- seqwrap_compose(
   )
 
 
-#' 
-#' Next, we will run the model using `seqwrap`. We recommend using `subset` to specify a smaller number of targets when prototyping the model. Here, we will assess whether the model output matches expectations. By specifying `return_models = TRUE`, all model objects will be returned in the results object, which can be inspected if needed. Here we are using a single core for fitting the models, specified in the `cores` argument.
-#' 
-## --------------------------------------------------------
+
 
 m1.1_temp <- seqwrap(
   m1.1, 
@@ -208,26 +134,16 @@ m1.1_temp <- seqwrap(
 )
 
 
-#' 
-#' Following iterative fitting using `seqwrap`, we can summarize the models using `seqwrap_summarise`, which produces a list of two summaries. Below, we are saving the summaries in an object for later access. Running the `seqwrap_summarise` function also gives us an overview of the model and successfully summarized targets.
-#' 
-#' In the `summaries` slot, model parameter values are returned (see @tbl-dungan-sum-temp). These are produced using `broom.mixed::tidy` which is a general function to retrieve model parameters from many regression model packages in R. 
-#' 
-#' In the `evaluations` slot, each model is evaluated using tests from the [DHARMa package](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html) (see @tbl-dungan-eval-temp). 
-#' 
-## --------------------------------------------------------
+
 
 m1.1_temp_sum <- seqwrap_summarise(m1.1_temp, verbose = FALSE)
 
 
-#' 
-#' 
-## --------------------------------------------------------
+#| label: tbl-dungan-sum-temp
 #| echo: false
 #| message: false
 #| warning: false
-#| label: tbl-dungan-sum-temp
-#| tbl-cap: "The first ten rows from summarised preliminary models (model summaries)."
+#| tbl-cap: The first ten rows from summarised preliminary models (model summaries).
 
 
 m1.1_temp_sum$summaries |> 
@@ -237,15 +153,12 @@ m1.1_temp_sum$summaries |>
   opt_table_font(size = 10)
 
 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
+#| label: tbl-dungan-eval-temp
 #| echo: false
 #| message: false
 #| warning: false
-#| label: tbl-dungan-eval-temp
-#| tbl-cap: "The first ten rows from summarised preliminary models (model evaluations). Values are p-values from the DHARMa package (see [here for details](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html))."
+#| tbl-cap: The first ten rows from summarised preliminary models (model evaluations).
+#|   Values are p-values from the DHARMa package (see [here for details](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html)).
 
 
 m1.1_temp_sum$evaluations |> 
@@ -254,14 +167,7 @@ m1.1_temp_sum$evaluations |>
   opt_table_font(size = 12)
 
 
-#' 
-#' 
-#' ### Specifying summary and evaluation function
-#' 
-#' We can specify custom functions for evaluating the model object. `seqwrap` allows for two slots (summaries and evaluations). Each function should take the model object as an argument, and for compatibility with `seqwrap_summarise`, return a data frame. For our next step, we would like to retrieve the dispersion parameter from each model. We will place this parameter in the evaluation function. We can extract the dispersion parameter on the log scale from the `glmmTMB` model object. We will construct a function around the extraction and include the observed counts from the data:
-#' 
-#' 
-## --------------------------------------------------------
+
 
 dispersion_fun <- function(x) {
   
@@ -275,28 +181,13 @@ dispersion_fun <- function(x) {
   
 }
 
-#' 
-#' Using our preliminary models, we can validate the function for one model.
-#' 
-## --------------------------------------------------------
+
 dispersion_fun(m1.1_temp@models[[1]])
 
-#' 
-#' The output is, as expected, a data frame with three columns. The dispersion parameter is expected to be on the log scale. To validate this we can directly access the estimated dispersion parameter from the model object using `sigma()`, which return the dispersion parameter on the natural scale. 
-#' 
-## --------------------------------------------------------
+
 log(sigma(m1.1_temp@models[[1]]))
 
-#' 
-#' 
-#' ### Running the full model
-#' 
-#' When we are happy with preliminary performance on a subset of targets, we can initialize `seqwrap` to iterate over all targets. We are updating the previous model with the new evaluation function directly in `seqwrap`. Notice that we also remove the `subset` and set `return_models` to `FALSE`. Saving all model objects will be too memory-consuming.
-#' 
-#' We should expect some errors from modelling many thousands of targets. As seen in the note from `seqwrap`, some models are associated with warnings from the modelling algorithm and/or errors from the evaluation function.
-#' 
-#' 
-## --------------------------------------------------------
+
 
 
 m1.2_results <- seqwrap(
@@ -309,11 +200,7 @@ m1.2_results <- seqwrap(
 
 
 
-#' 
-#' 
-#' Errors can be inspected by accessing the errors slot. From the inspection below, warnings are at least to some extent related to model convergence.
-#' 
-## --------------------------------------------------------
+
 
 warnings <- m1.2_results@errors|> 
   # filter the non-null elements
@@ -324,29 +211,17 @@ warnings <- m1.2_results@errors|>
 warnings[1]
 
 
-#' 
-#' 
-#' ### Using target data for prior information in `glmmTMB` 
-#' 
-#' A major benefit of canonical R packages for RNA-seq data modelling is the sharing of information between targets through shrinkage and empirical Bayes strategies. We suggest (see the main text) using priors in `glmmTMB` as convenient way of flexibly regularize models using an empirical Bayes strategy. In `glmmTMB`, the `priors` argument can be used to set priors on parameters. We will use the estimated parameters from the first model to set up the priors.
-#' 
-#' First, we need to extract the parameters. From the evaluation function we get the average log count and the dispersion parameter estimate. From the summaries, we will get the other parameters (summarized in @fig-dungan-estimates).
-#' 
-#' 
-## --------------------------------------------------------
+
 
 m1.2_sum <- seqwrap_summarise(m1.2_results, verbose = FALSE)
 
 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
-#| fig-cap: "Estimates from modelling the Dungan data. The dispersion trend is visualized using the default `ggplot`2::geom_smooth`."
+#| label: fig-dungan-estimates
 #| echo: false
 #| message: false
 #| warning: false
-#| label: fig-dungan-estimates
+#| fig-cap: Estimates from modelling the Dungan data. The dispersion trend is visualized
+#|   using the default `ggplot`2::geom_smooth`.
 
 library(cowplot)
 library(ggtext)
@@ -379,11 +254,7 @@ plot_grid(
           rel_widths = c(1, 1.5))
 
 
-#' 
-#' 
-#' Except for the dispersion values, we can easily summarize parameter values by their mean and standard deviation. A more elaborate summary of the dispersion values could include an estimate of the mean (log) dispersion, conditional on the average log counts. As the dispersion prior will be slightly different for each target (based on the observed counts), we will combine priors into target-specific data frames and store them as a list. `seqwrap` will make target-specific list elements available in each iteration, making it possible to build the prior data frame for `glmmTMB`.
-#' 
-## --------------------------------------------------------
+
 
 # Summarise parameters from the main output
 param_sum <- m1.2_sum$summaries |> 
@@ -442,11 +313,7 @@ for( j in 1:nrow( counts )) {
 }
 
 
-#' 
-#' 
-#' Again, we will combine data, metadata, and arguments using `seqwrap_compose`. We are now also adding the priors to the arguments. The variables used in the priors data frame are made available from the target-specific list referenced in `targetdata = Prior_list`. Using `arguments = alist(... ` avoids evaluation of the list so that the data frame is not evaluated before being used in each iteration. Priors have been built corresponding what is expected by `glmmTMB` (see [Priors in glmmTMB](https://glmmtmb.github.io/glmmTMB/articles/priors.html)).
-#' 
-## --------------------------------------------------------
+
 
 
 m1.3 <- seqwrap_compose(
@@ -476,10 +343,7 @@ m1.3_temp <- seqwrap(
 summary(m1.3_temp@models[[1]])
 
 
-#' 
-#' Running the prototyping seems to work, we will proceed with the full data set.
-#' 
-## --------------------------------------------------------
+
 
 m1.3_results <- seqwrap(
   m1.3, 
@@ -491,17 +355,12 @@ m1.3_results <- seqwrap(
 m1.3_sum <- seqwrap_summarise(m1.3_results, verbose = FALSE)
 
 
-#' 
-#' Regularization increases the number models without convergence issues, in fact all `r n_genes` targets have evaluations and summaries.
-#' 
-#' The summaries data frame is easily manipulated in subsequent analysis steps to, e.g., adjust p-values and create basic visualizations of the results (@fig-dungan-final-estimates).
-#' 
-## --------------------------------------------------------
-#| fig-cap: "A visualization of results from the regularized model of the Dungan et al. data."
+#| label: fig-dungan-final-estimates
 #| echo: false
 #| message: false
 #| warning: false
-#| label: fig-dungan-final-estimates
+#| fig-cap: A visualization of results from the regularized model of the Dungan et al.
+#|   data.
 
 
 
@@ -532,20 +391,6 @@ m1.3_sum$summaries |>
 
 
 
-#' 
-#' 
-#' The above example shows how to build models with `seqwrap`. Importantly, we make no claims about the validity of the final model but urge the user to assess assumptions in their data and models as part of a principled workflow.
-#' 
-#' 
-#' ## Comparing `lmerSeq` and `seqwrap`
-#' 
-#' `lmerseq` is a package for fitting RNA-seq data using mixed-effects models assuming Gaussian errors on transformed count data. Here, we perform a basic comparison between `lmerseq` [@vestal_lmerseq_2022] and `seqwrap`, using a subset from the gene expression data set presented in the main text from Pillon et al. [@pillon2022].
-#' 
-#' ### Data preprocessing
-#' 
-#' Here the Pillion gene expression data is downloaded and transformed using VST transform from `DESeq2` as suggested  in [@vestal_lmerseq_2022].
-#' 
-## --------------------------------------------------------
 #| label: comp-data
 #| echo: true
 #| message: false
@@ -605,13 +450,6 @@ rownames(vst_expr) <- countdat$geneid
 vst_expr <- vst_expr[1:15,]
 
 
-#' 
-#' 
-#' ### Fitting models in `lmerseq`
-#' 
-#' `lmerseq` has a `lmerseq.fit()` function for building and fitting the model.
-#' 
-## --------------------------------------------------------
 #| label: lmerseq
 #| echo: true
 #| message: false
@@ -644,13 +482,6 @@ lmerseq_summary <- coefs |>
 
 
 
-#' 
-#' 
-#' ### Fitting models in transformed data in `seqwrap`
-#' 
-#' Below we are building the same model with `seqwrap`. We are using `lmerTest::lmer` to get p-values from each model. `lmerseq` filters targets from the output due to singular fit, here we add a small function that evaluates singular fits in the `lme4`-based model. We will use only models with non-singular fits in the comparison.   
-#' 
-## --------------------------------------------------------
 #| label: seqwrap
 #| echo: true
 #| message: false
@@ -700,15 +531,9 @@ seqwrap_summary_df <- seqwrap_summarise(seqwrap_model,
 
 
 
-#' 
-#' ### Comparing results from `lmerseq`and `seqwrap`
-#' 
-#' Since both `lmerseq`and `seqwrap` uses the same underlying model and data, the output estimates are the same. The estimates and p-values of both approaches are visualized in @fig-comp-visualisation
-#' 
-## --------------------------------------------------------
 #| label: fig-comp-visualisation
 #| echo: false
-#| fig-cap: "Comparing estimates from `lmerseq` and `seqwrap`"
+#| fig-cap: Comparing estimates from `lmerseq` and `seqwrap`
 #| fig-height: 8
 
 
@@ -760,17 +585,8 @@ p2 <-  bind_rows(seqwrap_df,
 plot_grid(p1, p2, ncol = 1)
 
 
-#' 
-#' 
-#' ## Fitting the negative binomial and Poisson OLRE models using `seqwrap`
-#' 
-#' In the analyses presented in the main text, we used a negative binomial model as the point of departure for the analyses. The model was fitted in `seqwrap` using `glmmTMB` with the `nbinom2` family function. Below we show the code for fitting the model described in Eq. 1 (Negative binomial (non-informed)).
-#' 
-#' We used the TMM-method [@robinson2010] for calculating the effective library size before adding it to the metadata as log-transformed library sizes relative to the median-sized library. We are using the DHARMa package [@DHARMa] in a custom evaluation function (`sigma_summary2`), which also include additional metrics. 
-#' 
-## --------------------------------------------------------
 #| eval: false
-
+# 
 # ### Code chunk not evaluated ###
 # 
 # 
@@ -801,7 +617,7 @@ plot_grid(p1, p2, ncol = 1)
 # y <- edgeR::DGEList(countdat[,-1])
 # y <- edgeR::calcNormFactors(y)
 # 
-# # Store effective library sizes
+# # Store effective library sizes 
 # libsize <- y$samples |>
 #     rownames_to_column(var = "seq_sample_id") |>
 #     select(- group)
@@ -884,13 +700,8 @@ plot_grid(p1, p2, ncol = 1)
 #                       cores = parallel::detectCores())
 # 
 
-#' 
-#' 
-#' The Poisson Observation-Level Random Effect (OLRE) model was fitted using `glmmTMB` using the `stats::poisson` family function. The same data and metadata as prepared above was used. The below code corresponds to Eq. 2 in the main text (Poisson OLRE (non-informed)). Notice that the sample id variable is used to introduce the observation-level random effect into the model.
-#' 
-## --------------------------------------------------------
 #| eval: false
-
+# 
 # ### Code chunk not evaluated ###
 # 
 # m2 <- seqwrap_compose(
@@ -901,8 +712,8 @@ plot_grid(p1, p2, ncol = 1)
 #   eval_fun = sigma_summary2,
 #   targetdata = NULL,
 #   arguments = list(
-#     formula = y ~ time * group +
-#       offset(ln_efflibsize) +
+#     formula = y ~ time * group + 
+#       offset(ln_efflibsize) + 
 #       (1|id) +
 #       (1|seq_sample_id),
 #       family = stats::poisson)
@@ -917,13 +728,8 @@ plot_grid(p1, p2, ncol = 1)
 #       cores = parallel::detectCores())
 # 
 
-#' 
-#' 
-#' We regularized models by adding priors based on non-informed models. The general strategy was outlined above for the Dungan data example. Here follows the code for the negative binomial model. 
-#' 
-## --------------------------------------------------------
 #| eval: false
-
+# 
 # ### Code not evaluated ###
 # 
 # ## Summarise results from the non-informed model
@@ -1020,12 +826,12 @@ plot_grid(p1, p2, ncol = 1)
 # 
 # 
 #   # Here we prepare priors for the fixed effects, in this version all fixed
-#   # effects, except the intercept, will have regularizing priors
+#   # effects, except the intercept, will have regularizing priors 
 #   # corresponding to the distributions of effects seen in the non-informed
 #   # models.
 #   Priors_df <- bind_rows(
 #     data.frame(prior = paste0("normal(",
-#                               round(estimate_distributions$m,2 ),
+#                               round(estimate_distributions$m,2 ), 
 #                               ", ",
 #                               ,round(estimate_distributions$s,2 ), ")"),
 #                class = rep("fixef", 5),
@@ -1063,8 +869,8 @@ plot_grid(p1, p2, ncol = 1)
 # 
 #   }
 # 
-# # Fit regularized model
-# 
+# # Fit regularized model 
+#   
 #   m1.reg <- seqwrap_compose(
 #     data =  countdat,
 #     metadata =  metadat,
@@ -1089,14 +895,6 @@ plot_grid(p1, p2, ncol = 1)
 # 
 # 
 
-#' 
-#' 
-#' 
-#' ## Simulation results
-#' 
-#' Below follows supplementary results from the simulation study presented in the main text. 
-#' 
-## --------------------------------------------------------
 #| label: load-sim-results
 #| echo: false
 #| message: false
@@ -1104,9 +902,11 @@ plot_grid(p1, p2, ncol = 1)
 
 
 
-library(cowplot)
 
+
+library(cowplot)
 source("figures/figure-opts.R")
+
 
 ## Load data from simulations
 source("R/simulation-functions.R")
@@ -1126,16 +926,12 @@ sim_results2 <- extract_simulations(evaluations_path = "data_sim/evaluations2",
 
 
 
-#' 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
 #| label: fig-genecounts-simulated
-#| fig-cap: "Number of simulated gene targets (true negative and true positives) across dispersion scenarios and sample sizes."
 #| echo: false
 #| message: false
 #| warning: false
+#| fig-cap: Number of simulated gene targets (true negative and true positives) across
+#|   dispersion scenarios and sample sizes.
 #| fig-height: 6
 
 
@@ -1180,11 +976,6 @@ bind_rows(sim_results$populationeffects,
   facet_wrap(~ effect, scales = "free", ncol = 1)
 
 
-#' 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
 #| echo: false
 #| message: false
 #| warning: false
@@ -1198,6 +989,10 @@ true_effects <- bind_rows(sim_results$populationeffects,
             n = n()) 
 
 # Savining for manuscript
+
+# Check if data-out is a folder
+if(!dir.exists("data-out")) dir.create("data-out")
+
 saveRDS(true_effects, "data-out/true_effects.RDS")
 
 # Combine all true/false effects
@@ -1215,7 +1010,7 @@ est <- est_temp |>
     bind_rows(sim_results$populationeffects, 
               sim_results2$populationeffects) |>
                mutate(target = as.character(target)) |>
-               select(-file)) |>
+               dplyr::select(-file)) |>
 
   dplyr::select(target, term, estimate:p.value, population_effect, dataset, model, size, disp_scenario) |>
 
@@ -1230,14 +1025,10 @@ est <- est_temp |>
 
 
 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
-#| eval: true
 #| echo: false
 #| message: false
 #| warning: false
+#| eval: true
 
 
 convergence_stats <- bind_rows(sim_results$evaluations, 
@@ -1267,19 +1058,19 @@ convergence_stats <- bind_rows(sim_results$evaluations,
             conv = sum(conv),
             conv.nonstrict = sum(conv.nonstrict),
             ntotal = mean(ntotal)) 
-  
-  
+# Save for manuscript  
+saveRDS(convergence_stats, "data-out/covergence_stats.RDS")  
 
 
-#' 
-#' 
-## --------------------------------------------------------
-#| eval: true
-#| echo: false
-#| warning: false
-#| message: false
 #| label: fig-convergence
-#| fig-cap: "Number of models that provided estimates as a percentage of all potential targets. In (A), a strict criteria was used for convergence for the Gaussian model of transformed counts where models with singular fits where excluded as suggested by Vestal et al. (2022). In (B) all converged models are included."
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| fig-cap: Number of models that provided estimates as a percentage of all potential
+#|   targets. In (A), a strict criteria was used for convergence for the Gaussian model
+#|   of transformed counts where models with singular fits where excluded as suggested
+#|   by Vestal et al. (2022). In (B) all converged models are included.
 #| fig-height: 8
 
 
@@ -1363,17 +1154,16 @@ plot_grid(p1,
           labels = c("A", "B"))  
 
 
-#' 
-#' 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
 #| label: fig-pdist
-#| fig-cap: "Distribution of unadjusted p-values from all null-effects in models of simulated data. Non-uniform distributions indicate mis-specified models, i.e. models that do not capture variation in the data. Models are the negative binomial (NB), regularized negative binomial (NB-R), the Gaussian model of transformed counts (Gaussian), the Poisson observation-level random effect model (POLRE) and the regularized Poisson observation-level random effect model (POLRE-R)."
 #| echo: false
 #| message: false
 #| warning: false
+#| fig-cap: Distribution of unadjusted p-values from all null-effects in models of simulated
+#|   data. Non-uniform distributions indicate mis-specified models, i.e. models that
+#|   do not capture variation in the data. Models are the negative binomial (NB), regularized
+#|   negative binomial (NB-R), the Gaussian model of transformed counts (Gaussian), the
+#|   Poisson observation-level random effect model (POLRE) and the regularized Poisson
+#|   observation-level random effect model (POLRE-R).
 #| fig-height: 8
 #| fig-width: 6
 
@@ -1433,18 +1223,13 @@ est |>
 
 
 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
 #| label: fig-cor-sim
-#| fig-cap: "Average correlations between simulated population effects and estimates as a function of sample size in two parameters (Main and interaction effects) and two dispersion scenarios."
 #| echo: false
 #| message: false
 #| warning: false
+#| fig-cap: Average correlations between simulated population effects and estimates as
+#|   a function of sample size in two parameters (Main and interaction effects) and two
+#|   dispersion scenarios.
 #| fig-height: 5
 #| fig-width: 6
 
@@ -1531,13 +1316,9 @@ est |>
 
 
 
-#' 
-#' 
-#' 
-## --------------------------------------------------------
-#| eval: false
 #| echo: false
-
+#| eval: false
+# 
 # est |>
 # 
 #   filter(population_effect != 0) |>
@@ -1555,22 +1336,23 @@ est |>
 # 
 # 
 
-#' 
-#' 
-#' ## Supplementary tables
-#' 
-#' 
-## --------------------------------------------------------
+#| label: tbl-gsea
 #| echo: false
 #| message: false
 #| warning: false
-#| tbl-cap: "Gene set enrichment analysis of fold-changes in all models. For each model the top (and bottom) ranked gene sets were selected based on -log~10~(FDR) &times; NES. The sign of the normalized effect size (NES) indicate enrichment at top (positive fold-change in T2D vs. control) and bottom (negative fold change) ranked genes."
-#| label: tbl-gsea
+#| tbl-cap: Gene set enrichment analysis of fold-changes in all models. For each model
+#|   the top (and bottom) ranked gene sets were selected based on -log~10~(FDR) &times;
+#|   NES. The sign of the normalized effect size (NES) indicate enrichment at top (positive
+#|   fold-change in T2D vs. control) and bottom (negative fold change) ranked genes.
 
 
 
 library(gt)
 library(stringr)
+
+
+# To get the gsea results we need to run the figure 4 script
+if(!file.exists("data-out/gsea_results.RDS")) source("figures/figure4.R")
 
 gsea_results <- readRDS("data-out/gsea_results.RDS")
 
@@ -1617,13 +1399,7 @@ bind_rows(gsea_up, gsea_down) |>
 
 
 
-#' 
-#' 
-#' ## Comparing elapsed time 
-#' 
-#' Choosing the most appropriate modeling strategy for high-dimensional data can entail a high computational cost. `seqwrap` records the elapsed time for fitting a set of models. This estimate can assist in selecting modeling strategies. To retrieve the elapsed time:
-#' 
-## --------------------------------------------------------
+
 # Example of elapsed time using different modeling strategies. 
 library(seqwrap)
 
@@ -1662,16 +1438,13 @@ results2@elapsed_time
 results3@elapsed_time
 
 
-#' 
-#' Below, we are comparing three different algorithms, `lme4::glmer.nb`, `glmmTMB` and `glmmTMB` using a non-default optimizer. Using a subset gives indications on which algorithm is the fastest (@fig-timing). Differnt modeling packages are expected to have different computational costs depending on the model definition and the data [@brooks_glmmtmb_nodate]. Options within packages can also influence elapsed times, see e.g., the [lme4 performance tips](https://cran.r-project.org/web/packages/lme4/vignettes/lmerperf.html) vignette. 
-#' 
-#' 
-## --------------------------------------------------------
+#| label: fig-timing
 #| echo: false
 #| message: false
 #| warning: false
-#| label: fig-timing
-#| fig-cap: "Comparing elapsed time between three different algorithms using the same basic model (negative binomial on simulate count data with 8 clusters and 2 observations each). "
+#| fig-cap: 'Comparing elapsed time between three different algorithms using the same
+#|   basic model (negative binomial on simulate count data with 8 clusters and 2 observations
+#|   each). '
 
 
 dat <- simcounts(n_genes = 1000)
@@ -1681,8 +1454,10 @@ md <- dat$metadata
 
 md$libsize <- log(colSums(d[,-1]))
 
-size <- c(62, 125, 250, 500, 1000)
-cores <- c(62, 10, 10, 10, 10)
+available_cores <- parallel::detectCores()
+
+size <- c(62, 125, 250, 500)
+cores <- c(2, available_cores, available_cores, available_cores)
 
 time_results <- data.frame(size = size, 
                       mod1 = rep(NA, length(size)), 
@@ -1756,17 +1531,3 @@ time_results |>
 
 
 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
-#' 
