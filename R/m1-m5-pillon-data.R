@@ -317,6 +317,7 @@ if (!file.exists("data/m2_results.RDS")) {
   saveRDS(m2_results, "data/m2_results.RDS")
 }
 
+m2_results <- readRDS("data/m2_results.RDS")
 
 # 07. Model 3 - Gaussian on transformed counts ################################
 
@@ -357,7 +358,7 @@ if (!file.exists("data/m3_results.RDS")) {
   saveRDS(m3_results, "data/m3_results.RDS")
 }
 
-
+m3_results <- readRDS("data/m3_results.RDS")
 # 08. Model 4 - Non-informed Poisson OLRE #################################
 
 if (!file.exists("data/m4_results.RDS")) {

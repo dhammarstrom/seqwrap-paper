@@ -4,7 +4,8 @@
 #
 # This file runs files to collect data for documentation (figures, manuscript
 # and supplement files). To reproduce the results presented in the manuscript
-# models needs to be re-fitted. Running the full script will take > 2 hours.
+# models needs to be re-fitted. Running the full model script will
+# take > 2 hours.
 #
 # Simulation results are re-run if make_sim is set to TRUE. Running simulation
 # res takes > 24 hours (dependent on number of cores). We recommend downloading
