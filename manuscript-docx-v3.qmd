@@ -72,6 +72,9 @@ editor_options:
 #| echo: false
 #| message: false
 #| warning: false
+#| output: false
+
+source("R/check-packages.R")
 
 show_figures <- TRUE
 show_table <- FALSE

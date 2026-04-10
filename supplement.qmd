@@ -40,7 +40,22 @@ execute:
 
 ## Installing `seqwrap`
 
-`seqwrap` version 0.6.0 is available from GitHub. To install `seqwrap`: 
+```{r}
+#| label: check-packages
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+
+# Being able to re-produce this document requires a set of packages. 
+source("R/check-packages.R")
+
+```
+
+
+
+
+`seqwrap` version 0.6.1 is available from GitHub. To install `seqwrap`: 
 
 ```{r}
 #| eval: false

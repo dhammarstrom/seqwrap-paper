@@ -1,8 +1,7 @@
 ############################################################################
 # Check that all required packages are installed to run the repository.
 #
-# Note: The seqwrap needed to reproduce results is 0.6.1. This script
-# ensures that the correct version is installed.
+# Note. seqwrap
 #
 #
 #
