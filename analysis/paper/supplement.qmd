@@ -154,13 +154,13 @@ n_genes <- nrow(counts)
 
 ```
 
-The data suggests a negative binomial model where the linear predictor can be used to assess the difference between senolytic treatment and control (treat; $\beta_1g$), mechanical overloading compared to sham surgery (mov; $\beta_2g$), and their interaction ($\beta_3g$) for gene *g* in 1 to `r n_genes` and row *i* in 1 to 20 of the meta data (@eq-m1). We want to control for differences in sequencing depth by including an offset (*s*~i~). We will use the TMM method [@robinson2010] to calculate the effective library size.
+The data suggests a negative binomial model where the linear predictor can be used to assess the difference between senolytic treatment and control (treat; $\beta_{1g}$), mechanical overloading compared to sham surgery (mov; $\beta_{2g}$), and their interaction ($\beta_{3g}$) for gene *g* (*g* = 1, ..., *m*, here *m* = `r n_genes`) and observation *i* (*i* = 1, ..., *n*, here *n* = 20 rows of the metadata; @eq-m1). We want to control for differences in sequencing depth by including an offset (*s*~i~). We will use the TMM method [@robinson2010] to calculate the effective library size.
 
 
 $$
 \begin{align}
-y_{g[i]} &\sim \operatorname{NB2}(\mu_{g[i]}, \theta_g) \\
-\operatorname{log}(\mu_{g[i]}) &= \beta_0 + \beta_{1g}\text{treat}_i + \beta_{2g}\text{mov}_i + \beta_{3g}(\text{treat}_i \times  \text{mov}_i) + \operatorname{log}(s_i)
+y_{gi} &\sim \operatorname{NB2}(\mu_{gi}, \theta_g) \\
+\operatorname{log}(\mu_{gi}) &= \beta_{0g} + \beta_{1g}\text{treat}_i + \beta_{2g}\text{mov}_i + \beta_{3g}(\text{treat}_i \times  \text{mov}_i) + \operatorname{log}(s_i)
 \end{align}
 $$ {#eq-m1}
 
