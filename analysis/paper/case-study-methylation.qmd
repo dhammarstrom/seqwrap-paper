@@ -1,0 +1,21 @@
+---
+title: "Case study: DNA methylation (GSE114763)"
+format: html
+bibliography: "resources/bibliography-methylation.bib"
+csl: "resources/bmc-bioinformatics.csl"
+editor_options: 
+  chunk_output_type: console
+---
+
+Seaborne et al. [@seaborne2018] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophic loading. Genomic DNA was extracted from *vastus lateralis* biopsies obtained from eight untrained men at five time-points; baseline, immediately after an acute bout of resistance exercise (*acute*), after seven weeks of resistance training (*loading*), after seven weeks of training cessation (*unloading*), and after a further seven weeks of retraining (*reloading*). Genome-wide DNA methylation was profiled on the Illumina Infinium MethylationEPIC BeadChip (GPL21145, ~850,000 CpG sites) and the data were deposited in the Gene Expression Omnibus under accession GSE114763.
+
+
+
+```{r}
+#| label: dependencies
+#| eval: false
+
+# install.packages("BiocManager")
+pak::pkg_install("GEOquery")
+
+```

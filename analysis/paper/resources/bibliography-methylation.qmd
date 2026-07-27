@@ -1,0 +1,88 @@
+@article{seaborne2018,
+  title = {Human {{Skeletal Muscle Possesses}} an {{Epigenetic Memory}} of {{Hypertrophy}}},
+  author = {Seaborne, Robert A. and Strauss, Juliette and Cocks, Matthew and Shepherd, Sam and O'Brien, Thomas D. and van Someren, Ken A. and Bell, Phillip G. and Murgatroyd, Christopher and Morton, James P. and Stewart, Claire E. and Sharples, Adam P.},
+  year = 2018,
+  month = jan,
+  journal = {Scientific Reports},
+  volume = {8},
+  number = {1},
+  pages = {1898},
+  issn = {2045-2322},
+  doi = {10.1038/s41598-018-20287-3},
+  langid = {english}
+}
+
+
+@article{aryee2014,
+  title = {Minfi: A Flexible and Comprehensive {{Bioconductor}} Package for the Analysis of {{Infinium DNA}} Methylation Microarrays},
+  shorttitle = {Minfi},
+  author = {Aryee, Martin J. and Jaffe, Andrew E. and {Corrada-Bravo}, Hector and {Ladd-Acosta}, Christine and Feinberg, Andrew P. and Hansen, Kasper D. and Irizarry, Rafael A.},
+  year = 2014,
+  month = may,
+  journal = {Bioinformatics},
+  volume = {30},
+  number = {10},
+  pages = {1363--1369},
+  issn = {1367-4803},
+  doi = {10.1093/bioinformatics/btu049},
+  langid = {english}
+}
+
+
+@article{fortin2014,
+  title = {Functional Normalization of 450k Methylation Array Data Improves Replication in Large Cancer Studies},
+  author = {Fortin, Jean-Philippe and Labbe, Aurelie and Lemire, Mathieu and Zanke, Brent W. and Hudson, Thomas J. and Fertig, Elana J. and Greenwood, Celia M. T. and Hansen, Kasper D.},
+  year = 2014,
+  month = dec,
+  journal = {Genome Biology},
+  volume = {15},
+  number = {12},
+  pages = {503},
+  issn = {1474-760X},
+  doi = {10.1186/s13059-014-0503-2},
+  langid = {english}
+}
+
+
+@article{pidsley2016,
+  title = {Critical Evaluation of the {{Illumina MethylationEPIC BeadChip}} Microarray for Whole-Genome {{DNA}} Methylation Profiling},
+  author = {Pidsley, Ruth and Zotenko, Elena and Peters, Timothy J. and Lawrence, Mitchell G. and Risbridger, Gail P. and Molloy, Peter and Van Djik, Susan and Muhlhausler, Beverly and Stirzaker, Clare and Clark, Susan J.},
+  year = 2016,
+  month = oct,
+  journal = {Genome Biology},
+  volume = {17},
+  number = {1},
+  pages = {208},
+  issn = {1474-760X},
+  doi = {10.1186/s13059-016-1066-1},
+  langid = {english}
+}
+
+
+@article{mccartney2016,
+  title = {Identification of Polymorphic and Off-Target Probe Binding Sites on the {{Illumina Infinium MethylationEPIC BeadChip}}},
+  author = {McCartney, Daniel L. and Walker, Rosie M. and Morris, Stewart W. and McIntosh, Andrew M. and Porteous, David J. and Evans, Kathryn L.},
+  year = 2016,
+  month = sep,
+  journal = {Genomics Data},
+  volume = {9},
+  pages = {22--24},
+  issn = {2213-5960},
+  doi = {10.1016/j.gdata.2016.05.012},
+  langid = {english}
+}
+
+
+@article{smithson2006,
+  title = {A Better Lemon Squeezer? {{Maximum-likelihood}} Regression with Beta-Distributed Dependent Variables},
+  shorttitle = {A Better Lemon Squeezer?},
+  author = {Smithson, Michael and Verkuilen, Jay},
+  year = 2006,
+  journal = {Psychological Methods},
+  volume = {11},
+  number = {1},
+  pages = {54--71},
+  issn = {1939-1463},
+  doi = {10.1037/1082-989X.11.1.54},
+  langid = {english}
+}
