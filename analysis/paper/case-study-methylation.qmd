@@ -7,15 +7,1279 @@ editor_options:
   chunk_output_type: console
 ---
 
-Seaborne et al. [@seaborne2018] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophic loading. Genomic DNA was extracted from *vastus lateralis* biopsies obtained from eight untrained men at five time-points; baseline, immediately after an acute bout of resistance exercise (*acute*), after seven weeks of resistance training (*loading*), after seven weeks of training cessation (*unloading*), and after a further seven weeks of retraining (*reloading*). Genome-wide DNA methylation was profiled on the Illumina Infinium MethylationEPIC BeadChip (GPL21145, ~850,000 CpG sites) and the data were deposited in the Gene Expression Omnibus under accession GSE114763.
+## Introduction 
 
+The following document outlines a partial reanalysis of data describing CpG methylation status in human skeletal muscle in response to resistance exercise training, de-training and re-training [@seaborne2018;@seaborne2018b]. All relevant code is explicitly shown here whereas the version of this case study included in the manuscript has been stripped from some details.
+
+
+## Raw data and pre-processing
 
 
 ```{r}
 #| label: dependencies
-#| eval: false
+#| eval: true
 
-# install.packages("BiocManager")
-pak::pkg_install("GEOquery")
+library(GEOquery)      # For accessing the raw data
+library(minfi)         # For pre-processing of raw data
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(maxprobes)     # For filtering cross-reactive probes 
+library(seqwrap)
+
+
+# Load color scale 
+source(here::here("analysis/figures/figure-opts.R"))
+
 
 ```
+
+
+```{r}
+#| label: paths
+#| eval: true
+
+# Prepare data download. 
+# Note for use in the present repo: 
+# raw_data and derived data are gitignored so safe for 
+# large files. If code-re-use, check the download folder before committing 
+# changes to git. 
+
+# The GEO ID
+gse_id   <- "GSE114763"
+
+# Set download directories
+raw_dir  <- here::here("analysis/data/raw_data", gse_id)
+idat_dir <- file.path(raw_dir, "idat")
+der_dir  <- here::here("analysis/data/derived_data")
+
+dir.create(idat_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(der_dir,  recursive = TRUE, showWarnings = FALSE)
+
+```
+
+### Downloading data
+
+Sample titles and characteristics are read from the SOFT text view of the series, which returns the metadata of all 40 samples. The supplementary archive (`GSE114763_RAW.tar`, ~722 MB) provides the IDAT files.
+
+```{r}
+#| label: download
+#| eval: true
+
+
+# The metadata (pheno_raw) and the raw data IDAT files are cached after 
+# downloading once. 
+
+
+
+# A function for retrying connection to GEO for downloading large data.
+# This was created after issues with downloading the large zipped archive
+# from GEO. 
+retry_url <- function(expr, tries = 5, pause = 5) {
+  call <- substitute(expr)          # re-evaluated on each attempt
+  env  <- parent.frame()
+  for (i in seq_len(tries)) {
+    out <- try(eval(call, env), silent = TRUE)
+    if (!inherits(out, "try-error")) return(out)
+    if (i < tries) Sys.sleep(pause * i)
+  }
+  stop("failed after ", tries, " attempts: ",
+       conditionMessage(attr(out, "condition")))
+}
+
+# Series-level metadata
+#
+# The metadata contains file names and titles include 
+# time-points and participant information. 
+pheno_file <- file.path(raw_dir, "pheno_raw.rds")
+
+if (!file.exists(pheno_file)) {
+  soft_url <- paste0("https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+                     "?acc=", gse_id, "&targ=gsm&form=text&view=brief")
+
+  soft <- retry_url({
+    res <- curl::curl_fetch_memory(soft_url)
+    if (res$status_code != 200) stop("HTTP ", res$status_code)
+    strsplit(rawToChar(res$content), "\r?\n")[[1]]
+  })
+
+  # one record per sample; "!Sample_<key> = <value>" lines within each
+  kv <- tibble::tibble(record = cumsum(startsWith(soft, "^SAMPLE")),
+                       line   = soft) |>
+    dplyr::filter(startsWith(line, "!")) |>
+    tidyr::separate(line, into = c("key", "value"), sep = " = ",
+                    extra = "merge") |>
+    dplyr::mutate(key = stringr::str_remove(key, "^!Sample_"))
+
+  # characteristics are themselves "<key>: <value>" pairs
+  characteristics <- kv |>
+    dplyr::filter(key == "characteristics_ch1") |>
+    tidyr::separate(value, into = c("key", "value"), sep = ": ",
+                    extra = "merge") |>
+    dplyr::filter(key %in% c("gender", "age", "weight", "height")) 
+
+  # Cleaning the metadata for downstream processing. 
+  pheno_raw <- kv |>
+    dplyr::filter(key %in% c("geo_accession", "title")) |>
+    dplyr::bind_rows(characteristics) |>
+    tidyr::pivot_wider(id_cols = record, names_from = key,
+                       values_from = value) |>
+    dplyr::select(-record) |> 
+
+        mutate(title_sep = title) |> 
+        separate(title_sep, into = c("seq_sample_id", "timeid"), sep = ":") |>
+        mutate(timeid = gsub(" Muscle_", "", timeid)) |> 
+        mutate(timeid = gsub("Participant_", "", timeid)) |> 
+        mutate(timeid = gsub("7wk_", "7wk", timeid)) |> 
+        
+         separate(timeid, into = c("time", "participant", "replicate"), sep = "_") |> 
+      # Making time-point more obvious
+        mutate(time = case_when(
+              time == "Baseline" ~ "1_baseline", 
+              time == "Acute" ~ "2_acute", 
+              time == "7wkLoading" ~ "3_loading", 
+              time == "7wkUnloading"  ~ "4_unloading", 
+              time == "7wkRe-oading" ~ "5_reloading"
+        )) |> 
+        # Fixing meta-data details
+        mutate(weight = gsub(" kg", "", weight), 
+               height = gsub("cm", "", height), 
+               weight = as.numeric(weight), 
+               height = as.numeric(height), 
+               age = as.numeric(age)) |> 
+        # Fix a misprinted participant id
+        mutate(participant = gsub("P006", "006", participant)) 
+  
+
+  saveRDS(pheno_raw, pheno_file)
+}
+
+pheno_raw <- readRDS(pheno_file)
+
+# Double check 40 expected samples
+stopifnot(nrow(pheno_raw) == 40)
+
+# Download and extract raw IDAT files.
+# IDATs are distributed gzipped; minfi reads decompressed files
+tar_file <- file.path(raw_dir, paste0(gse_id, "_RAW.tar"))
+
+if (!file.exists(tar_file)) {
+  # ~722 MB; increase the timeout for slow connections
+  options(timeout = 60 * 60)
+  retry_url(GEOquery::getGEOSuppFiles(gse_id, baseDir = dirname(raw_dir),
+                                      makeDirectory = TRUE))
+}
+
+if (length(list.files(idat_dir, pattern = "\\.idat$")) == 0) {
+  utils::untar(tar_file, exdir = idat_dir)
+
+  # Unzip idat files
+  gz <- list.files(idat_dir, pattern = "\\.idat\\.gz$", full.names = TRUE)
+  invisible(lapply(gz, R.utils::gunzip, overwrite = TRUE, remove = TRUE))
+}
+
+```
+
+### Metadata summary
+
+A total of 40 samples were downloaded from the Gene Expression Omnibus ([GSE114763](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE114763)). The identified metadata corresponds to the metadata published in [@seaborne2018b] (see table 2 in @seaborne2018b).
+
+Seaborne et al. removed two samples after outlier analysis, (samples `SkM_Epi_Mem_1` and `SkM_Epi_Mem_39`), we will do the same.
+
+
+```{r}
+#| label: tbl-meta-samples
+#| tbl-cap: "Sample metadata retreived from GEO ([GSE114763](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE114763)) corresponding to @seaborne2018b".
+#| echo: false
+
+
+library(gt)
+
+pheno_raw |> 
+      summarise(.by = participant, 
+                weight = mean(weight), 
+                height = mean(height), 
+                age = mean(age)) |> 
+      mutate(participant = gsub("00", "", participant)) |> 
+      select(participant, age, height, weight) |> 
+      gt() |> 
+      cols_label(participant = "Participant", 
+                 age = "Age (years)", 
+                 weight = "Weight (kg)", 
+                 height = "Height (cm)")
+      
+      
+```
+
+
+## Case study description
+
+
+```{r}
+#| label: case-description
+#| echo: false
+
+# Double check gender 
+# pheno_raw |> 
+#      distinct(gender)
+# Confirm all males
+
+
+# Get sample metadata into text
+sample_metadata <- pheno_raw |> 
+      
+      summarise(.by = participant, 
+                weight = mean(weight), 
+                height = mean(height), 
+                age = mean(age)) |> 
+      pivot_longer(weight:age) |> 
+      summarise(.by = name, 
+                m = mean(value), 
+                s = sd(value)) |> 
+      mutate(unit = c("kg", "cm", "years")) |> 
+      mutate(stat = paste0(sprintf("%.1f", round(m, 1)), 
+                           " (", 
+                           sprintf("%.1f", round(s, 1)), 
+                           ") ", 
+                           unit)) 
+
+age <- filter(sample_metadata, name == "age") |> pull(stat)
+height <- filter(sample_metadata, name == "height") |> pull(stat)
+weight <- filter(sample_metadata, name == "weight") |> pull(stat)
+
+```
+
+
+> Seaborne et al. [@seaborne2018;@seaborne2018b] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this aim, previously untrained male participants (age, [mean (SD)] `r age`; weight, `r weight`; height, `r height`) completed a sequential design with two seven-week periods of resistance-exercise training (RET) intersected with a 7-week unloading period without RET. RET-periods included two weekly sessions targeting lower limbs (seven exercises) and one weekly session targeting the upper body (5 exercises; 4 sets of 10 repetition per exercise). Skeletal muscle biopsies were sampled from m. vastus lateralis on five occasions; before the intervention, 30 min after the first exercise session and after the completion of each of the 7-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Kit, Qiagen, Manchester, UK) and bisulfite converted prior to amplification, fragmentation and hybridization using the Illumina Infinium Human MethylationEPIC Beadchip protocol [@seaborne2018;@seaborne2018b]. 
+
+
+The Sentrix slide (chip) and array position are recovered from the IDAT file names (e.g. `GSM3149860_201496860025_R01C01_Grn.idat`) and retained as potential technical covariates in subsequent analyses. `Basename` is the file stem that `minfi` uses to locate the red/green channel pair.
+
+The samples are distributed as described in [@seaborne2018;@seaborne2018b] with one participant dropping out from the study prior to the last sampling time-point. One participant have duplicate arrays at one time-point. After removal of outlier samples (see @seaborne2018b), the full data set contains 38 samples with no technical duplicates. 
+
+```{r}
+#| label: metadata
+#| eval: true
+
+idat_stems <- list.files(idat_dir, pattern = "_Grn\\.idat$") |>
+  stringr::str_remove("_Grn\\.idat$")
+
+array_info <- tibble::tibble(stem = idat_stems) |>
+  tidyr::separate(stem, into = c("geo_accession", "slide", "array"),
+                  sep = "_", remove = FALSE) |>
+  dplyr::mutate(Basename = file.path(idat_dir, stem))
+
+metadata <- pheno_raw |>
+      # Removing outlier sample, see "Quality Control of DNA Methylation Probes"
+      # in @seaborne2018b
+      filter(!grepl("SkM_Epi_Mem_1:", title), 
+             !grepl("SkM_Epi_Mem_39:", title)) |> 
+      
+  tibble::as_tibble() |>
+  dplyr::select(geo_accession,
+                title,
+                participant,
+                gender,
+                age, 
+                time) |>
+  dplyr::mutate(
+    label = stringr::str_remove(title, "^SkM_Epi_Mem_\\d+:\\s*")) |>
+  dplyr::left_join(array_info, by = "geo_accession")
+
+stopifnot(!anyNA(metadata$time), !anyNA(metadata$participant))
+
+# 38 arrays: 8 participants x 5 time points with missing values.
+with(metadata, table(participant, time))
+```
+
+### Reading IDAT and array-level quality control
+
+We will use the `minfi` package [@fortin2014] to read the raw data and perform quality control, filtering and normalization. As a first step, array-level filtering is done using detection p-values where methylated and unmethylated positions are compared to negative control positions. This comparison produces a p-value used to identify problematic genomic positions. As shown below (@fig-array-qc), array-level aggregates show mean values < 0.01.    
+
+
+```{r}
+#| label: fig-array-qc
+#| fig-cap: "Array-level quality control. Mean detection p-values and fraction of failed genomic positions per array subdivided by time-point."
+#| eval: true
+
+rgset <- minfi::read.metharray(metadata$Basename, extended = TRUE, force = TRUE)
+
+# Check that orders correspond
+stopifnot(identical(colnames(rgset), basename(metadata$Basename)))
+
+colnames(rgset) <- metadata$geo_accession
+
+
+det_p <- minfi::detectionP(rgset)
+
+qc <- tibble::tibble(
+  geo_accession = colnames(det_p),
+  mean_det_p    = colMeans(det_p),
+  frac_failed   = colMeans(det_p > 0.01))
+
+qc |> 
+      inner_join(pheno_raw |> 
+                       select(geo_accession, time)) |> 
+      ggplot(aes(mean_det_p, frac_failed, color = time)) + 
+      geom_point() +
+      geom_vline(xintercept = 0.01) +
+      labs(x = "Array-level mean detection p-value", 
+           y = "Fraction of failed genomic positions (p > 0.01)", 
+           color = "Time-point")
+```
+
+For 
+
+```{r}
+
+# Below is the suggested workflow for confirming sex. We expect only males and 
+# the function indficate that only one sex is present which should suffice as 
+# confirmation.
+# predicted   <- minfi::getSex(minfi::mapToGenome(msetraw))
+# qc$pred_sex <- predicted$predictedSex
+
+# All samples pass quality control
+keep_samples <- qc$geo_accession[qc$mean_det_p < 0.01]
+# length(keep_samples)
+
+rgset    <- rgset[, keep_samples]
+det_p    <- det_p[, keep_samples]
+metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
+```
+
+### Normalization and probe filtering
+
+Functional normalization [@fortin2014] is used because the study design can be expected to result in global methylation differences. Functional normalization removes technical variation captured by the array control probes without assuming a common methylation distribution across samples [@fortin2014]. Probes are then removed if they (1) fail detection in any retained sample, (2) overlap common SNPs at the target CpG or single-base extension site, (3) appear on published lists of cross-reactive EPIC probes (using the [`maxprobes`](https://github.com/markgene/maxprobes/) package), or (iv) map to the sex chromosomes (all male cohort).
+
+```{r}
+#| label: normalise-filter
+#| eval: true
+
+
+
+# Functional normalization
+gset <- minfi::preprocessFunnorm(rgset, ratioConvert = FALSE)
+
+# Initial number of probes
+nprobes_init <- dim(gset)[1]
+
+## (i) detection
+det_p  <- det_p[match(minfi::featureNames(gset), rownames(det_p)), ]
+keep   <- rowSums(det_p < 0.01) == ncol(gset)
+gset   <- gset[keep, ]
+
+# Number of probes after filtering
+nprobes_detectionfilter <- dim(gset)[1]
+
+## (ii) SNP-affected probes 
+gset <- minfi::dropLociWithSnps(gset, snps = c("SBE", "CpG"), maf = 0)
+
+nprobes_snp <- dim(gset)[1]
+
+## (iii) cross-reactive probes 
+gset <- maxprobes::dropXreactiveLoci(gset)
+
+nprobes_cross <- dim(gset)[1]
+
+## (iv) sex chromosomes 
+anno <- minfi::getAnnotation(gset)
+gset <- gset[!anno$chr %in% c("chrX", "chrY"), ]
+
+nprobes_final <- dim(gset)[1]
+
+
+## Clean up memory 
+rm(rgset); gc()
+
+
+
+```
+
+`r nprobes_init` normalized probes were filtered based on detection which retained `r nprobes_detectionfilter`, after SNP-overlap (n = `r nprobes_snp`), cross-reactivity (n = `r nprobes_cross`) and sex-chromosome mapping filtering, n = `r nprobes_final` remained in the data set. 
+
+### Calculation of methylation quantities
+
+An Illumina array detecting methylation values produces arbitrary signals for the unmethylated (U) and methylated (M) portion of the i^th^ genomic position. Converting these two values to a methylation score is done trough the calculation of a &beta; value.
+
+$$
+\beta_i = \frac{M_i}{M_i+U_i + c}
+$$
+The bias constant c, is added to the denominator to avoid large variations in the &beta; score when probe intensities are low [@bibikova2006]. This value was set to $c = 100$ to achieve regularization of the &beta; values in cases where both M and U were small [@bibikova2006], which is also the default in the `minfi` package when `type = "illumina"`. However, the sucessfull choice of c is noted to depend on the pre-processing of the data (see `?minfi::getBeta`). 
+
+Inspecting the normalized signals representing methylated and unmethylated probes indicate that the constant will only have a minor impact on most sites as both *M* and *U* are >> 100 @fig-raw-data-characteristics A.   
+
+```{r}
+#| label: fig-raw-data-characteristics
+#| fig-cap: "Methylated and Unmethylated signals accross samples and a subset of the genomic sites (n = 1000) shows that most signals are well above 100 (A). Calculation of beta; values with different selections of *c* indicate minor differences in the overall distribution of values (B). Both figures have the relative density on the y axis (not shown)"
+
+# Extract the methylated and unmethylated signals
+M <- minfi::getMeth(gset)
+U <- minfi::getUnmeth(gset)
+
+# Set the number of probes
+n <- 1000
+
+# Figure A: Methylated and Unmethylated signals accross samples. 
+set.seed(1)
+
+# Sample sites 
+sites <- sample(rownames(M), n)
+
+figa <- data.frame(M)[sites,] |> 
+
+   
+      tibble::rownames_to_column(var = "id") |> 
+      
+      pivot_longer(starts_with("GSM"), values_to = "M") |> 
+      
+      inner_join(
+            data.frame(U)[sites,] |> 
+                  tibble::rownames_to_column(var = "id") |> 
+                  pivot_longer(starts_with("GSM"), values_to = "U")     
+      ) |> 
+      pivot_longer(cols = M:U, 
+                   names_to = "signal") |> 
+      ggplot(aes(value, group = paste0(signal,name), 
+                 color = signal)) + 
+      geom_line(stat = "density") +
+      scale_x_log10()  + 
+      theme_classic() + 
+      theme(axis.title.y = element_blank(), 
+            axis.ticks.y = element_blank(), 
+            axis.line.y = element_blank(), 
+            axis.text.y = element_blank()) + 
+      scale_color_manual(values = colors) + 
+      labs(x = "Normalized signal (AU)", 
+           color = "Signal type")
+
+
+figb <- data.frame(M)[sites,] |> 
+ 
+   
+      tibble::rownames_to_column(var = "id") |> 
+      
+      pivot_longer(starts_with("GSM"), values_to = "M") |> 
+      
+      inner_join(
+            data.frame(U)[sites,] |> 
+
+                  tibble::rownames_to_column(var = "id") |> 
+                  pivot_longer(starts_with("GSM"), values_to = "U")     
+      ) |> 
+      
+     mutate(beta0 = M / (M + U + 0), 
+            beta50 = M / (M + U + 50),
+            beta100 = M / (M + U + 100)) |> 
+      dplyr::select(id, name, beta0:beta100) |>
+
+      pivot_longer(cols = starts_with("beta"), 
+                   names_to = "constant", 
+                   values_to = "beta") |> 
+      mutate(constant = as.numeric(gsub("beta", "", constant))) |> 
+      
+      ggplot(aes(beta, group = constant, color = as.factor(constant))) +
+      geom_line(stat = "density") +
+       theme_classic() + 
+      theme(axis.title.y = element_blank(), 
+            axis.ticks.y = element_blank(), 
+            axis.line.y = element_blank(), 
+            axis.text.y = element_blank(), 
+            axis.title.x = ggtext::element_markdown()) + 
+      scale_color_manual(values = colors) + 
+      labs(x = "&beta;-values", 
+           color = "Offset constant")
+      
+
+cowplot::plot_grid(figa, figb, ncol = 1)
+
+```
+
+We decide to go for the default value of *c* = 100 for the calculation of the &beta; values. 
+&beta;-values are restricted to the 0 to 1 space, and although this is an intuitive metric for understanding the methylation status at a specific genomic site (e.g., as a percentage methylation), it is an inconvenient quantity for a statistical model that expects normally distributed errors [@laird2010; @du2010]. Indeed, when applying a Gaussian model to indentify differentially methylated genomic sites, a logit transformation of the &beta;-values results in more favorable diagnostics [@du2010]. The logit transformation of the &beta; values results in M-values. 
+
+$$
+M = \log_2 \left( \frac{\beta}{1-\beta} \right)
+$$
+
+The logit transformation (using a base 2 logarithm) puts the methylation values on a scale with no upper or lower bounds (-ininf;, &ininf;, @fig-beta-mval). This transformation is done on the &beta;-values directly to avoid missing c in the calculation.  
+
+
+```{r}
+
+beta <- seq(from = 0.001, to = 0.999, by = 0.001)
+Mval <- log2(beta/(1-beta))
+
+data.frame(beta, Mval) |> 
+      ggplot(aes(Mval, beta)) + geom_line() + 
+      theme_classic() + 
+      labs(x = "M-values", y = "&beta;-values") + 
+      theme(axis.title.y = ggtext::element_markdown())
+
+```
+
+
+
+```{r}
+# Data preparation.
+
+# Calculate the beta-values with the Illumina-style offset (c = 100)
+beta_vals <- getBeta(gset, offset = 100)
+# Derive M-values from the calculated beta values.
+m_vals <- log2( beta_vals / (1-beta_vals) )
+
+
+
+# No need to squeeze beta values away from the boundaries: (y(n - 1) + 0.5) / n
+# n_obs     <- ncol(beta_vals)
+# beta_vals <- (beta_vals * (n_obs - 1) + 0.5) / n_obs
+
+betadf <- data.frame(beta_vals) |> 
+      tibble::rownames_to_column(var = "id") |> 
+      dplyr::select(id, starts_with("GSM")) 
+      
+mdf <- data.frame(m_vals) |> 
+      tibble::rownames_to_column(var = "id") |> 
+      dplyr::select(id, starts_with("GSM"))
+```
+
+Next we will compare the models by Type-1 error rates determined from permutation tests from re-labeling within participant. This relabeling establishes a null-distribution for statistical tests performed using the *within-participant design*. Since all comparisons will be done respecting this design this is the right permutation as it keeps the within-participant correlation.
+
+We will perform the permutation tests on a subset of genomic sites distributed across different strata of &beta; values. 
+
+
+### Design of the permutation study
+
+The permutation loop below produces two results from a single set of model fits.
+
+A fixed number of sites is sampled from each &beta;-value stratum. Within every permutation, a subset of those sites receives a *known* effect (the "spike-in") while the remainder are left untouched. Sites without an effect estimate the *type I error rate*, sites with an effect estimate *power*, and because both classes are present in the same family of tests, the Benjamini-Hochberg step can be scored against known truth to give a realised *false discovery proportion*.
+
+Three points of construction matter:
+
+1.  The effect is added on the **M-value scale** and the &beta;-values are derived     from the spiked M-values. A shift of &delta; M-units is exactly the fixed-effect     parameter of the Gaussian model and exactly the linear-predictor shift of the     beta model's logit link, so neither model is favoured by the parameterisation
+
+2.  Effect sizes are **crossed with a sign**. At an extreme site, adding &delta;     compresses towards the boundary while subtracting it moves towards 0.5; these are not equally detectable, and the two models disagree precisely about the variance function in that region. Balanced signs stop the result depending on an arbitrary choice of direction.
+
+3.  The spike assignment is **redrawn in every permutation**. With a fixed set of     spiked sites, the site-to-site heterogeneity in residual variance is estimated     from only a handful of sites no matter how many permutations are run.
+
+
+```{r}
+#| label: permutation-setup
+#| eval: false
+
+set.seed(1)
+
+# Sites sampled per beta-value stratum
+size <- 200
+
+# Effect sizes (in M-value units) multiplied with a sign, and the number of
+# spiked sites allocated to each (delta x sign) cell within every stratum.
+delta_grid <- c(0.1, 0.2, 0.4, 0.8)
+cells      <- expand.grid(delta = delta_grid, sign = c(1, -1))
+n_per_cell <- 5
+
+# Sites spiked per stratum, and the resulting proportion of true alternatives
+n_spike <- nrow(cells) * n_per_cell
+pi1     <- n_spike / size
+
+# delta_grid holds effect MAGNITUDES; direction comes from the crossed sign,
+# and assign_spike() returns delta already signed. The grid is free to change,
+# but three things must hold.
+stopifnot(
+      # A zero entry would produce a "spiked" site with no effect, and a
+      # negative entry would duplicate a cell that the sign crossing already
+      # creates (delta = -1, sign = +1 is the same site as delta = 1, sign = -1).
+      all(delta_grid > 0),
+      # Duplicated values silently merge in the by-delta summaries.
+      !anyDuplicated(delta_grid),
+      # Unspiked sites are what the null distribution is estimated from.
+      size > n_spike)
+
+# Expanding the grid raises the proportion of true alternatives unless `size`
+# is raised with it: pi1 = 2 * length(delta_grid) * n_per_cell / size. Keep an
+# eye on this -- the realised FDR is only interpretable at a plausible pi1.
+pi1
+
+# The time-point that receives the simulated effect. Within-participant
+# permutation preserves each participant's set of labels, so the number of
+# samples carrying a given label is the same in every permutation. Choose a
+# level with full representation.
+spike_time <- "3_loading"
+
+# beta- and M-values are two representations of the same data
+stopifnot(identical(rownames(m_vals), rownames(beta_vals)),
+          identical(colnames(m_vals), colnames(beta_vals)))
+
+# We want to "test" the models on a subset of sites that represents low, mid
+# and high beta values. row_id is assigned before any filtering so that it
+# indexes rows of beta_vals / m_vals directly.
+subset <- data.frame(
+      id = row.names(beta_vals),
+      betacat = cut(rowMeans(beta_vals),
+                    breaks = seq(0, 1, by = 0.2),
+                    labels = c("xlow", "low", "mid", "high", "xhigh"),
+                    include.lowest = TRUE)) |>
+      dplyr::mutate(row_id = dplyr::row_number()) |>
+      dplyr::filter(!is.na(betacat)) |>
+      dplyr::group_by(betacat) |>
+      dplyr::slice_sample(n = size) |>
+      dplyr::ungroup()
+
+# slice_sample() returns fewer rows without complaint when a stratum holds less
+# than `size` sites, which would then fail inside assign_spike(). The beta-value
+# distribution is bimodal, so the "mid" stratum is the thin one.
+stopifnot(all(table(subset$betacat) == size))
+
+# Site-by-sample M-value matrix for the sampled sites, in `subset` row order.
+# Every positional operation below relies on this alignment.
+m_sub <- m_vals[subset$row_id, , drop = FALSE]
+stopifnot(identical(rownames(m_sub), subset$id))
+
+# plogis() saturates to exactly 0/1 near |M| = 37, which the beta model cannot
+# accept, and the spike is what pushes extreme sites outwards. Check the worst
+# case the grid can produce now, rather than failing part-way through the loop
+# with some iterations already written to disk.
+stopifnot(max(abs(m_sub)) + max(delta_grid) < 30)
+
+
+# Permute time labels within participant. This keeps each participant's mean
+# and the within-participant correlation, and destroys the association between
+# the response and the time-point.
+permute_time <- function(md) {
+      md |>
+            dplyr::group_by(participant) |>
+            dplyr::mutate(time_permute = sample(time)) |>
+            dplyr::ungroup() |>
+            dplyr::select(geo_accession, participant, time, time_permute)
+}
+
+# Allocate spiked sites to (delta x sign) cells, balanced within stratum.
+# Sites that are not spiked get delta = 0 and are the true nulls.
+#
+# `delta` is returned SIGNED, i.e. it is the effect actually added to the
+# M-values, so it can be used directly downstream. `delta_abs` keeps the
+# magnitude for summaries that pool the two directions.
+assign_spike <- function(sub, cells, n_per_cell) {
+
+      # One code per spiked site: cell 1 repeated n_per_cell times, then cell 2,
+      # and so on. Codes are 1..nrow(cells); 0 marks an unspiked site.
+      codes <- rep(seq_len(nrow(cells)), each = n_per_cell)
+
+      # Signed effect per cell, with a leading 0 so that code 0 -> no effect
+      cell_delta <- c(0, cells$delta * cells$sign)
+
+      sub |>
+            dplyr::group_by(betacat) |>
+            # Pad the codes with zeros up to the size of the stratum and shuffle:
+            # every cell gets exactly n_per_cell sites, allocated at random.
+            dplyr::mutate(cell_id = sample(
+                  c(codes, rep(0L, dplyr::n() - length(codes))))) |>
+            dplyr::ungroup() |>
+            dplyr::mutate(delta     = cell_delta[cell_id + 1L],
+                          delta_abs = abs(delta))
+}
+
+
+# Convergence information for each fit.
+# m$fit$convergence is 0 when the optimiser reports a satisfactory solution.
+# m$sdr$pdHess is TRUE when the Hessian is positive definite (no singular fit,
+# no unidentifiable parameters). We want 0 and TRUE.
+eval_fun <- function(m) {
+      data.frame(convergence = m$fit$convergence,
+                 pdHess      = m$sdr$pdHess,
+                 n           = nrow(m$frame))
+}
+
+# Wald summaries only: one model fit per site.
+summary_fun_wald <- function(m) {
+      broom.mixed::tidy(m) |>
+            dplyr::select(effect, term, estimate, std.error, p.value)
+}
+
+# Wald summaries plus an omnibus likelihood-ratio test for the time factor.
+# This refits a reduced model at every site and therefore doubles the number of
+# model fits. The reduced model is built from the fitted model frame rather than
+# with update(), so that it does not depend on objects in the calling
+# environment -- update() is not reliable inside socket-cluster workers.
+summary_fun_lrt <- function(m) {
+
+      out <- broom.mixed::tidy(m) |>
+            dplyr::select(effect, term, estimate, std.error, p.value)
+
+      p_lrt <- tryCatch({
+            m0 <- glmmTMB::glmmTMB(y ~ (1 | participant),
+                                   data   = m$frame,
+                                   family = stats::family(m))
+            stats::anova(m0, m)[["Pr(>Chisq)"]][2]
+      }, error = function(e) NA_real_)
+
+      dplyr::bind_rows(
+            out,
+            data.frame(effect   = "omnibus",
+                       term     = "time_omnibus",
+                       estimate = NA_real_,
+                       std.error = NA_real_,
+                       p.value  = p_lrt))
+}
+
+# TRUE doubles the number of model fits. Keep FALSE for the pilot.
+use_lrt     <- FALSE
+summary_fun <- if (use_lrt) summary_fun_lrt else summary_fun_wald
+```
+
+### The permutation loop
+
+Each iteration writes a single RDS file. An iteration whose file already exists is skipped, so a pilot run at `n_perm = 20` can be extended to the full run by raising `n_perm` and re-executing the chunk, completed iterations are not refitted. The seed is set per iteration so that any single permutation can be reproduced on its own.
+
+```{r}
+#| label: permutation-loop
+#| eval: false
+
+n_perm  <- 5   # raise to ~200 for the full run once the pilot looks sensible
+out_dir <- here::here("analysis/data/derived_data/permutation")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Worker start-up cost.
+#
+# seqwrap() creates a PSOCK cluster and destroys it again on every call, and
+# each worker runs the project .Rprofile -- so renv activates once per worker,
+# per call. Measured on this machine that is ~19 s of fixed cost per seqwrap()
+# call at cores = 12, against ~22 s of actual fitting for 1000 sites; the loop
+# makes two calls per iteration, so most of the run would be start-up.
+#
+# Pointing R_PROFILE_USER at an empty file makes the workers skip .Rprofile,
+# and pushing .libPaths() through R_LIBS keeps them on the same renv library so
+# package versions are unchanged. This takes the fixed cost to ~4 s per call.
+.env_saved <- Sys.getenv(c("R_PROFILE_USER", "R_LIBS"), unset = NA)
+.empty_profile <- tempfile(fileext = ".R")
+file.create(.empty_profile)
+Sys.setenv(R_PROFILE_USER = .empty_profile,
+           R_LIBS = paste(.libPaths(), collapse = .Platform$path.sep))
+
+# pblapply prints a progress bar on every seqwrap() call; noise in a loop.
+.pbo <- pbapply::pboptions(type = "none")
+
+# Because the workers no longer run .Rprofile, renv does not hide the base R
+# library from them: they get the renv library and sandbox first (identical to
+# this session) with the system library appended as a fallback. Packages that
+# renv manages therefore resolve identically -- but one that is MISSING from the
+# renv library would fail here and be silently taken from the system library on
+# a worker. Assert that the packages doing the work resolve to the same place.
+.pkgs   <- c("seqwrap", "glmmTMB", "broom.mixed")
+.stamp  <- function(pk) vapply(pk, function(p)
+                  paste(find.package(p), utils::packageVersion(p)), character(1))
+.parent <- .stamp(.pkgs)
+.cl     <- parallel::makeCluster(2)
+.worker <- parallel::clusterCall(.cl, .stamp, .pkgs)
+parallel::stopCluster(.cl)
+stopifnot(all(vapply(.worker, identical, logical(1), .parent)))
+
+# tryCatch(finally =) rather than local(): the restore below runs even if the
+# loop aborts, while assignments inside the loop stay visible in the global
+# environment for inspection after a failure.
+tryCatch({
+
+for (i in seq_len(n_perm)) {
+
+      iter_file <- file.path(out_dir, sprintf("perm_%04d.RDS", i))
+      if (file.exists(iter_file)) next
+
+      set.seed(1000 + i)
+
+      ## (1) Permute the time labels within participant
+      metapermute <- permute_time(metadata)
+      stopifnot(setequal(colnames(m_sub), metapermute$geo_accession))
+
+      ## (2) Draw a spike assignment
+      spike_design <- assign_spike(subset, cells, n_per_cell)
+      stopifnot(identical(spike_design$id, subset$id))
+
+      ## (3) Samples that receive the simulated effect 
+      # Matched by name, never by position: the column order of m_sub and the
+      # row order of metapermute are not guaranteed to agree.
+      x <- as.integer(
+            metapermute$time_permute[
+                  match(colnames(m_sub), metapermute$geo_accession)] == spike_time)
+      stopifnot(!anyNA(x), sum(x) > 0)
+
+      ## (4) Add the effect on the M scale, derive beta from it ------------
+      # delta is already signed, and is zero for unspiked rows, while x is zero
+      # for unspiked columns -- so outer() places the shift on the intersection
+      # only.
+      s <- spike_design$delta
+
+      m_spiked    <- m_sub + outer(s, x)
+      beta_spiked <- stats::plogis(m_spiked * log(2))
+
+      # plogis saturates to exactly 0/1 around |M| = 37, which the beta model
+      # cannot accept. The spike is what pushes extreme sites outwards.
+      stopifnot(max(abs(m_spiked)) < 30,
+                all(beta_spiked > 0 & beta_spiked < 1))
+
+      m_subset    <- data.frame(id = subset$id, m_spiked,    check.names = FALSE)
+      beta_subset <- data.frame(id = subset$id, beta_spiked, check.names = FALSE)
+
+      ## (5) Fit both models to the same permuted, spiked data -------------
+      bm1 <- seqwrap_compose(
+            modelfun    = glmmTMB::glmmTMB,
+            data        = beta_subset,
+            metadata    = metapermute,
+            samplename  = "geo_accession",
+            eval_fun    = eval_fun,
+            summary_fun = summary_fun,
+            arguments   = list(
+                  formula = y ~ time_permute + (1 | participant),
+                  family  = glmmTMB::beta_family()))
+
+      mm1 <- seqwrap_compose(
+            modelfun    = glmmTMB::glmmTMB,
+            data        = m_subset,
+            metadata    = metapermute,
+            samplename  = "geo_accession",
+            eval_fun    = eval_fun,
+            summary_fun = summary_fun,
+            arguments   = list(
+                  formula = y ~ time_permute + (1 | participant)))
+
+      bm1_results <- seqwrap(bm1, return_models = FALSE, cores = 12, verbose = FALSE)
+      mm1_results <- seqwrap(mm1, return_models = FALSE, cores = 12, verbose = FALSE)
+
+      bm1_sum <- seqwrap_summarise(bm1_results, verbose = FALSE)
+      mm1_sum <- seqwrap_summarise(mm1_results, verbose = FALSE)
+
+      ## (6) Collect -------------------------------------------------------
+      res_i <- dplyr::bind_rows(
+            bm1_sum$summaries |> dplyr::mutate(model = "beta"),
+            mm1_sum$summaries |> dplyr::mutate(model = "m")) |>
+            # Keep the time contrasts (and the omnibus test when enabled)
+            dplyr::filter(base::grepl("^time", term)) |>
+            # FDR is controlled ACROSS SITES within a term, not within a site
+            dplyr::mutate(.by = c(model, term),
+                          qval = stats::p.adjust(p.value, method = "BH")) |>
+            dplyr::mutate(iter = i) |>
+            dplyr::select(model, iter, target, term,
+                          estimate, std.error, p.value, qval)
+
+      eval_i <- dplyr::bind_rows(
+            bm1_sum$evaluations |> dplyr::mutate(model = "beta"),
+            mm1_sum$evaluations |> dplyr::mutate(model = "m")) |>
+            dplyr::mutate(iter = i)
+
+      saveRDS(list(iter        = i,
+                   summaries   = res_i,
+                   evaluations = eval_i,
+                   design      = spike_design |>
+                         dplyr::select(id, betacat, delta, delta_abs) |>
+                         dplyr::mutate(iter = i),
+                   metapermute = metapermute),
+              iter_file)
+}
+
+}, finally = {
+      # Runs whether the loop completed or aborted, so the modified environment
+      # never leaks into the rest of the document.
+      pbapply::pboptions(.pbo)
+      for (v in names(.env_saved)) {
+            if (is.na(.env_saved[[v]])) Sys.unsetenv(v)
+            else do.call(Sys.setenv, stats::setNames(list(.env_saved[[v]]), v))
+      }
+      unlink(.empty_profile)
+})
+
+
+
+```
+
+### Reading the results back
+
+```{r}
+#| label: permutation-collect
+#| eval: false
+
+perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
+perm       <- lapply(perm_files, readRDS)
+
+perm_summaries <- dplyr::bind_rows(lapply(perm, `[[`, "summaries"))
+perm_designs   <- dplyr::bind_rows(lapply(perm, `[[`, "design"))
+perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
+
+# Which coefficients actually carry the simulated effect.
+#
+# The spike shifts only the samples labelled `spike_time` under the permuted
+# labels. With 1_baseline as the reference level, the only contrast with a
+# non-zero true value is the one against spike_time -- on a spiked site the
+# 2_acute, 4_unloading and 5_reloading contrasts are still nulls. The omnibus
+# LRT is an alternative on a spiked site, because the time factor as a whole
+# does have an effect.
+alt_terms <- c(paste0("time_permute", spike_time), "time_omnibus")
+
+# Attach the per-iteration truth (delta, sign, stratum) to every test.
+# is_alt is ground truth for a (site, term) pair, not for a site.
+perm_dat <- perm_summaries |>
+      dplyr::inner_join(perm_designs,
+                        by = c("iter", "target" = "id")) |>
+      # delta is signed, so the test must be != 0 -- `delta > 0` would classify
+      # every downward-spiked site as a null and contaminate the reference.
+      dplyr::mutate(is_alt = delta != 0 & term %in% alt_terms)
+
+stopifnot(any(perm_dat$is_alt))
+
+# Convergence failures are dropped silently by seqwrap_summarise (NULL entries
+# are removed before rbind), so differential failure between the two models
+# would quietly change what is being compared. Report it.
+perm_evals |>
+      dplyr::summarise(.by = c(model),
+                       n_fits     = dplyr::n(),
+                       n_fail     = sum(convergence != 0 | !pdHess),
+                       prop_fail  = mean(convergence != 0 | !pdHess))
+```
+
+### Type I error rate
+
+Calibration is measured on the unspiked sites only. The unaffected contrasts on a
+*spiked* site are nominally null too, but adding the effect changes the fitted mean
+of one group, and under the beta likelihood the variance is a function of the mean --
+so the shared dispersion parameter, and with it the other contrasts, are mildly
+perturbed. Those tests are excluded from the reference distribution rather than
+pooled into it.
+
+```{r}
+#| label: permutation-type1
+#| eval: false
+
+null_dat <- perm_dat |> dplyr::filter(delta == 0)
+
+t1e <- null_dat |>
+      dplyr::summarise(.by = c(model, term, betacat),
+                       n      = dplyr::n(),
+                       a_05   = mean(p.value < 0.05, na.rm = TRUE),
+                       a_01   = mean(p.value < 0.01, na.rm = TRUE),
+                       a_001  = mean(p.value < 0.001, na.rm = TRUE))
+
+t1e
+
+# Null p-value distribution by stratum
+null_dat |>
+      ggplot(aes(sample = p.value)) +
+      stat_qq(distribution = stats::qunif) +
+      stat_qq_line(distribution = stats::qunif) +
+      facet_grid(betacat ~ model) +
+      labs(x = "Expected quantile (uniform)", y = "Observed p-value")
+
+```
+
+### Power at matched empirical size
+
+Comparing power at the nominal 5% level is confounded by size: a model whose actual
+type I error is 7% will appear more powerful simply because it rejects more of
+everything. The empirical 5% quantile of the null p-values, taken per model and
+stratum from the *same* permutations, is used as the critical value instead, so both
+models are compared while operating at exactly 5% empirical size.
+
+```{r}
+#| label: permutation-power
+#| eval: false
+
+crit <- null_dat |>
+      dplyr::summarise(.by = c(model, term, betacat),
+                       crit = stats::quantile(p.value, 0.05, na.rm = TRUE))
+
+# is_alt, not delta != 0: only the contrast against spike_time (and the omnibus
+# test) carries the effect. Grouping must keep `term`, otherwise the spiked
+# contrast is pooled with the three unaffected ones and power is diluted towards
+# the nominal level. `delta` is signed here, so upward and downward spikes are
+# reported separately -- keep `delta_abs` too for the pooled view.
+power_dat <- perm_dat |>
+      dplyr::filter(is_alt) |>
+      dplyr::inner_join(crit, by = c("model", "term", "betacat")) |>
+      dplyr::summarise(.by = c(model, term, betacat, delta, delta_abs),
+                       n             = dplyr::n(),
+                       power_nominal = mean(p.value < 0.05, na.rm = TRUE),
+                       power_matched = mean(p.value < crit, na.rm = TRUE))
+
+# Power against the signed effect. At the extreme strata the two directions are
+# not equally detectable -- an upward spike at an xhigh site compresses towards
+# the boundary -- so asymmetry about zero is a result, not noise.
+power_dat |>
+      ggplot(aes(delta, power_matched, colour = model)) +
+      geom_line() +
+      geom_point() +
+      facet_grid(term ~ betacat) +
+      scale_colour_manual(values = colors) +
+      labs(x = "Simulated effect (M-value units, signed)",
+           y = "Power at 5% empirical size",
+           colour = "Model")
+
+# Pooled over direction
+power_dat |>
+      dplyr::summarise(.by = c(model, term, betacat, delta_abs),
+                       power_matched = stats::weighted.mean(power_matched, n),
+                       n = sum(n)) |>
+      ggplot(aes(delta_abs, power_matched, colour = model)) +
+      geom_line() +
+      geom_point() +
+      facet_grid(term ~ betacat) +
+      scale_colour_manual(values = colors) +
+      labs(x = "Simulated effect (M-value units, magnitude)",
+           y = "Power at 5% empirical size",
+           colour = "Model")
+```
+
+### Realised false discovery proportion
+
+Because true nulls and true alternatives are present in the same family of tests,
+the Benjamini-Hochberg step can be scored directly. Note that this is a statement
+about a family of `size * 5` sites, not about the full array: the BH threshold for
+the smallest p-value scales with the number of tests, so this does not certify FDR
+control at the ~700,000-site scale.
+
+```{r}
+#| label: permutation-fdp
+#| eval: false
+
+# Only the families that contain true alternatives can be scored as an FDR.
+# A false discovery is a rejection of a (site, term) pair that is not is_alt.
+fdp <- perm_dat |>
+      dplyr::filter(term %in% alt_terms) |>
+      dplyr::summarise(.by = c(model, term, iter),
+                       R   = sum(qval < 0.05, na.rm = TRUE),
+                       V   = sum(qval < 0.05 & !is_alt, na.rm = TRUE),
+                       FDP = ifelse(R > 0, V / R, 0))
+
+fdp |>
+      dplyr::summarise(.by = c(model, term),
+                       n_iter    = dplyr::n(),
+                       mean_R    = mean(R),
+                       FDR       = mean(FDP))
+
+# The remaining contrasts are complete nulls -- no site carries an effect on
+# them -- so every discovery is false and FDP is 1 whenever anything is
+# rejected. There the quantity of interest is P(at least one rejection), which
+# BH bounds by q under the complete null.
+perm_dat |>
+      dplyr::filter(!term %in% alt_terms) |>
+      dplyr::summarise(.by = c(model, term, iter),
+                       R = sum(qval < 0.05, na.rm = TRUE)) |>
+      dplyr::summarise(.by = c(model, term),
+                       n_iter = dplyr::n(),
+                       p_any  = mean(R > 0))
+```
+
+### Agreement between the two models
+
+```{r}
+#| label: permutation-agreement
+#| eval: false
+
+perm_dat |>
+      dplyr::filter(delta == 0) |>
+      dplyr::select(iter, target, term, betacat, model, p.value) |>
+      tidyr::pivot_wider(names_from = model, values_from = p.value) |>
+      ggplot(aes(-log10(m), -log10(beta))) +
+      geom_point(alpha = 0.2) +
+      geom_abline(slope = 1, intercept = 0) +
+      facet_wrap(~ betacat) +
+      labs(x = "M-value model, -log10(p)",
+           y = "Beta model, -log10(p)")
+```
+
+## AIC
+
+
+```{r}
+
+
+# Evaluation function with corrected (Jacobian) AIC for model comparison
+eval_aic_beta <- function(m) {
+    
+      # This calculates the log likelihood for the 
+      # beta model. Adds n (number of obs) for the 
+      # model to double check no dropped obs. 
+      # Adds bsum to confirm the same input
+      
+      beta <- as.numeric(m$frame[[1]])
+      
+      out <- data.frame(ll = as.numeric(logLik(m)), 
+                        n = dim(m$frame)[1], 
+                        bsum = sum(beta))
+      
+      return(out)
+      
+}
+
+eval_aic_m <- function(m) {
+      
+      # This calculates the log likelihood for the 
+      # M model. Adds n (number of obs) for the 
+      # model to double check no dropped obs. 
+      # Adds bsum to confirm the same input
+      # The jacobian correction is added to the log likelihood.
+      
+      M <- as.numeric(m$frame[[1]])
+      beta <- stats::plogis(M * log(2))
+      # Jacobian correction
+      jac <- -log(log(2)) - log(beta) - log(1-beta)
+      # Corrected ll, n, and sum of beta values
+      out <- data.frame(ll = as.numeric(logLik(m)) + sum(jac), 
+                        n = dim(m$frame)[1], 
+                        bsum = sum(beta))
+      
+       return(out)
+      
+}
+
+
+
+
+# Setting up the models
+bm1 <- seqwrap_compose(
+      modelfun = glmmTMB::glmmTMB, 
+      data = betadf, 
+      metadata = metadata, 
+      samplename = "geo_accession", 
+      eval_fun = eval_aic_beta,
+      arguments = list(
+            formula = y ~ time + (1|participant),
+            family = glmmTMB::beta_family)
+)
+
+
+mm1 <- seqwrap_compose(
+      modelfun = glmmTMB::glmmTMB, 
+      data = mdf, 
+      metadata = metadata, 
+      samplename = "geo_accession", 
+      eval_fun = eval_aic_m,
+      arguments = list(
+            formula = y ~ time + (1|participant))
+)
+
+
+
+
+bm1_results <- seqwrap(bm1, 
+                       subset = subset$row_id, 
+                       return_models = FALSE, 
+                       cores = 12)
+
+
+mm1_results <- seqwrap(mm1, 
+                       subset = subset$row_id,
+                       return_models = FALSE, 
+                       cores = 12)
+
+
+
+
+
+
+
+saveRDS(bm1_results, here::here("analysis/data/derived_data/bm1_results.RDS"))
+saveRDS(mm1_results, here::here("analysis/data/derived_data/mm1_results.RDS"))
+
+
+
+bm1_sum <- seqwrap_summarise(bm1_results)
+mm1_sum <- seqwrap_summarise(mm1_results)
+
+
+
+aic_dat <- mm1_sum$evaluations |> 
+      mutate(model = "mm") |> 
+      bind_rows(
+            bm1_sum$evaluations |> 
+      mutate(model = "bm")) |>  
+      pivot_wider(names_from = model, 
+                  values_from = c(ll, bsum)) |> 
+      # Compare beta sum to check
+      mutate(comp = bsum_mm - bsum_bm) |> 
+      # Calculate AIC delta
+      mutate(delta_aic = -2 * (ll_mm - ll_bm)) |> 
+      inner_join(subset |> 
+                       rename(target = id)) 
+     
+   aic_dat |>    
+      ggplot(aes(delta_aic)) + geom_line(stat = "density") + 
+      facet_wrap(~ betacat) 
+      
+
+aicm <- lm(delta_aic ~ 0 + betacat, data = aic_dat)
+summary(aicm)
+
+
+mm1_sum$evaluations |> 
+      mutate(model = "mm") |> 
+      bind_rows(
+            bm1_sum$evaluations |> 
+      mutate(model = "bm")) |> 
+            
+      inner_join(subset |> 
+                       rename(target = id)) |>  
+      
+     
+      
+      ggplot(aes(quantile)) + geom_histogram() + 
+      facet_grid(betacat ~ model)
+
+
+mm1_sum$evaluations |> 
+      mutate(model = "mm") |> 
+      bind_rows(
+            bm1_sum$evaluations |> 
+      mutate(model = "bm")) |> 
+            
+      inner_join(subset |> 
+                       rename(target = id)) |> 
+      inner_join(cden |> 
+                       rename(target = id)) |> 
+      
+      select(target, betacat, quantile, model, intensity_cat) |> 
+
+      ggplot(aes(quantile)) + geom_histogram() + 
+
+      
+      facet_wrap(intensity_cat ~ model)
+
+
+
+
+
+
+mm1_sum$evaluations |> 
+      rename(mm = pval) |> 
+      inner_join(
+            bm1_sum$evaluation |> 
+                  rename(bm = pval)
+      ) |> 
+       inner_join(subset |> 
+                       rename(target = id)) |> 
+      ggplot(aes(bm, mm)) + geom_point() + 
+      facet_wrap(~ betacat)
+
+
+
+bm1_sum$evaluations
+
+
+m <- bm1_results@models[[1]]
+m <- mm1_results@models[[1]]
+
+
+summary(m)
+
+
+```
+
+
+
+
+
+
+see here https://link.springer.com/article/10.1186/1471-2105-11-587
+
+
+
+
+
+
+
