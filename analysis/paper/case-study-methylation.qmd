@@ -1002,9 +1002,9 @@ power_dat <- perm_dat |>
 # the boundary -- so asymmetry about zero is a result, not noise.
 power_dat |>
       ggplot(aes(delta, power_matched, colour = model)) +
-      geom_line() +
-      geom_point() +
-      facet_grid(term ~ betacat) +
+      geom_line(position = position_dodge(width = 0.02)) +
+      geom_point(position = position_dodge(width = 0.02)) +
+      facet_grid( ~ betacat) +
       scale_colour_manual(values = colors) +
       labs(x = "Simulated effect (M-value units, signed)",
            y = "Power at 5% empirical size",
@@ -1016,8 +1016,8 @@ power_dat |>
                        power_matched = stats::weighted.mean(power_matched, n),
                        n = sum(n)) |>
       ggplot(aes(delta_abs, power_matched, colour = model)) +
-      geom_line() +
-      geom_point() +
+      geom_line(position = position_dodge(width = 0.02)) +
+      geom_point(position = position_dodge(width = 0.02)) +
       facet_grid(term ~ betacat) +
       scale_colour_manual(values = colors) +
       labs(x = "Simulated effect (M-value units, magnitude)",
@@ -1072,9 +1072,12 @@ perm_dat |>
 #| eval: false
 
 perm_dat |>
-      dplyr::filter(delta == 0) |>
-      dplyr::select(iter, target, term, betacat, model, p.value) |>
-      tidyr::pivot_wider(names_from = model, values_from = p.value) |>
+      dplyr::filter(delta != 0) |>
+      dplyr::select(iter, target, term, betacat, model,estimate, p.value) |>
+      tidyr::pivot_wider(names_from = model, values_from = c(estimate,p.value)) |>
+      
+      print()
+      
       ggplot(aes(-log10(m), -log10(beta))) +
       geom_point(alpha = 0.2) +
       geom_abline(slope = 1, intercept = 0) +
@@ -1082,6 +1085,165 @@ perm_dat |>
       labs(x = "M-value model, -log10(p)",
            y = "Beta model, -log10(p)")
 ```
+
+
+
+## Full model run
+
+```{r}
+
+# The annotation file
+gset <- readRDS(here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS"))
+anno <- minfi::getAnnotation(gset)
+nsites <- nrow(anno)
+
+```
+
+
+The unfiltered Illumina EPIC data has over 800 000 CpG positions. After filtering the available dataset contained `r nsites` CpG positions. Since the strategy here is to detect differentially methylated positions (DMP) we will fit a model per available position using the &beta;- and M-values and their respective model (generalized linear model with &beta; and normal likelihoods, respectively). 
+
+
+### Computational time
+
+```{r}
+#| echo: false
+
+
+# Elapsed time
+beta_model_full <- readRDS(
+      here::here("analysis/data/derived_data/beta-model-full.RDS"))
+m_model_full <- readRDS(
+      here::here("analysis/data/derived_data/m-model-full.RDS"))
+
+beta_time <- beta_model_full@elapsed_time
+m_time <- m_model_full@elapsed_time
+
+beta_time <- round(beta_time[3] /60 /60, 1)
+m_time <- round(m_time[3] /60 /60, 1)
+
+# Number of sucessfull models 
+beta_errors_sum <- sapply(beta_model_full@errors, function(x) sum(!sapply(x, is.null)))
+m_errors_sum <- sapply(m_model_full@errors, function(x) sum(!))
+
+rm(beta_model_full)
+rm(m_model_full)
+
+gc()
+
+
+# What were the errors
+m_warnings <- m_model_full@errors |> 
+      filter(!sapply(warnings_fit, is.null)) |> 
+      pull(warnings_fit) 
+
+```
+
+Running the full model took `r beta_time` and `r m_time` hours for the &beta; and M-models, respectively using 12 cores on a laptop computer (AMD Ryzen 5 7540U, 3.2 GHz, 16 GB RAM).
+
+The &beta;-regression model returned estimates for all `r beta_errors_sum[1]` sites while the model on M-values flagged `r m_errors_sum[3]` models for convergence issues.
+
+
+
+```{r}
+
+
+m_model_sum <- readRDS(here::here("analysis/data/derived_data/m-model-full-sum.RDS"))
+beta_model_sum <- readRDS(here::here("analysis/data/derived_data/beta-model-full-sum.RDS"))
+
+
+beta_model_sum$summaries |> 
+      filter(grepl("time", term)) |> 
+
+      dplyr::select(target, term, estimate, std.error, p.value) |> 
+      mutate(.by = term, 
+             qval = p.adjust(p.value, method = "fdr")) |> 
+      
+      filter(term == "time3_loading") |> 
+      
+
+
+
+
+m_model_sum$summaries |> 
+      filter(grepl("time", term)) |> 
+      dplyr::select(target, term, estimate, std.error, p.value) |> 
+      mutate(.by = term, 
+             qval = p.adjust(p.value, method = "fdr")) |> 
+      
+      filter(term == "time4_unloading") |> 
+      filter(p.value < 0.05) |> 
+      mutate(direction = if_else(sign(estimate) > 0, "pos", "neg")) |> 
+      summarise(.by = direction, 
+                n = n())
+
+
+# Read seaborn data 
+sdat <- readxl::read_excel(
+      path = here::here("analysis/data/resource_data/seaborne2018-suppl.xlsx"), 
+                        sheet = 2) |> 
+      select(target = `Column ID`, 
+             p.value = `p-value(Time)`, 
+             ratio_estimate = `MeanRatio(Baseline vs. Chronic Loading)`, 
+             estimate = `Estimate(Baseline vs. Chronic Loading)`
+             ) |> 
+      print()
+
+levels(factor(metadata$time))
+
+  supp <- readxl::read_excel(
+      path = here::here("analysis/data/resource_data/seaborne2018-suppl.xlsx"), sheet = 2)
+  theirs <- supp |>
+    select(target = `Column ID`,
+           their_est = `Estimate(Baseline vs. Chronic Loading)`) |>
+    mutate(their_dir = -sign(their_est))      # flip to loading-minus-baseline   
+
+  ours <- m_model_sum$summaries |>
+    filter(effect == "fixed", component == "cond", term == "time3_loading") |>   
+    select(target, estimate)
+
+  cmp <- inner_join(ours, theirs, by = "target")
+
+  mean(sign(cmp$estimate) == cmp$their_dir)      
+  cor(cmp$estimate, -cmp$their_est, method = "spearman")
+  table(sign(cmp$estimate), cmp$their_dir)
+            
+            
+      ggplot(aes(p.value, org.pval)) + geom_point()
+
+
+      dplyr::select(target, term, estimate, std.error, p.value) |> 
+      mutate(.by = term, 
+             qval = p.adjust(p.value, method = "fdr")) |> 
+      
+      filter(term == "time4_unloading") |> 
+
+      filter(target == "cg15154546")
+      arrange(p.value) |> 
+      print()
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## AIC
 
