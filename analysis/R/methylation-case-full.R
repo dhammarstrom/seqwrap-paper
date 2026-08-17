@@ -187,6 +187,7 @@ if (
     bm1,
     return_models = FALSE,
     cores = cores,
+    #   subset = 1:10,
     verbose = FALSE,
   )
 
@@ -224,6 +225,7 @@ if (
     mm1,
     return_models = FALSE,
     cores = cores,
+    # subset = 1:12,
     verbose = FALSE,
   )
 
@@ -263,40 +265,19 @@ if (
 
 if (
   !file.exists(
-    here::here("analysis/data/derived_data/m-model-full-sum.RDS")
+    here::here("analysis/data/derived_data/m-model-full-sum.RDS.RDS")
   )
 ) {
-  mm1_results <- readRDS(
-    here::here("analysis/data/derived_data/m-model-full.RDS")
+  mm1_sum <- seqwrap_summarise(
+    readRDS(
+      here::here("analysis/data/derived_data/m-model-full.RDS")
+    )
   )
-
-  # Targets where the fit failed leave a NULL summary and a zero-row
-  # evaluation (eval_fun is still called, on a NULL model). seqwrap_summarise
-  # only filters NULL, so the zero-row frames break it. Drop both here, and
-  # take target names from the list via .id -- the number of rows per target
-  # is not constant and must not be assumed.
-  drop_empty <- function(x) {
-    x[!vapply(x, function(d) is.null(d) || NROW(d) == 0L, logical(1))]
-  }
-
-  # .id falls back to positional indices ("1", "2", ...) on an unnamed list
-  # rather than erroring, so confirm the target names are actually there.
-  stopifnot(
-    !is.null(names(mm1_results@summaries)),
-    !is.null(names(mm1_results@evaluations))
-  )
-
-  sums <- bind_rows(drop_empty(mm1_results@summaries), .id = "target")
-  evals <- bind_rows(drop_empty(mm1_results@evaluations), .id = "target")
-
-  # Same structure as seqwrap_summarise() returns
-  mm1_sum <- list(summaries = sums, evaluations = evals)
 
   saveRDS(
     mm1_sum,
     here::here("analysis/data/derived_data/m-model-full-sum.RDS")
   )
-
-  rm(mm1_results, sums, evals, mm1_sum)
+  rm(mm1_sum)
   gc()
 }
