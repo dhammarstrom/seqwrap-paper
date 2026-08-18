@@ -1,4 +1,4 @@
-# This script runs the permutation study on the methylation data set
+# This script runs the permutation study on the methylation data set from
 # seaborne et al..
 # The resulting data is evaluated in case-study-methylation.qmd
 

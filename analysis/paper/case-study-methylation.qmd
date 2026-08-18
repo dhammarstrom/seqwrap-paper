@@ -9,12 +9,10 @@ editor_options:
 
 ## Introduction 
 
-The following document outlines a partial reanalysis of data on CpG methylation status in human skeletal muscle in response to resistance exercise training, followed by detraining and subsequent retraining [@seaborne2018;@seaborne2018b]. All relevant code is explicitly shown here, whereas the version of this case study included in the manuscript has been stripped of some details.
+The following document outlines a partial reanalysis of data on CpG methylation status in human skeletal muscle in response to resistance exercise training, followed by detraining and subsequent retraining [@seaborne2018;@seaborne2018b]. Most of the relevant code is explicitly shown here, whereas the version of this case study included in the manuscript has been stripped of some details.
 
 
 ## Raw data and pre-processing
-
-
 
 ```{r}
 #| label: dependencies
@@ -74,8 +72,6 @@ Sample titles and characteristics are read from the SOFT text view of the series
 
 # The metadata (pheno_raw) and the raw data IDAT files are cached after 
 # downloading once. 
-
-
 
 # A function for retrying connection to GEO for downloading large data.
 # This was created after issues with downloading the large zipped archive
@@ -218,7 +214,6 @@ pheno_raw |>
 
 
 ## Case study description
-
 
 ```{r}
 #| label: case-description
@@ -545,37 +540,7 @@ data.frame(Mval, beta) |>
 
 ```
 
-
-
-```{r}
-# Data preparation.
-
-# Calculate the beta-values with the Illumina-style offset (c = 100)
-beta_vals <- getBeta(gset, offset = 100)
-# Derive M-values from the calculated beta values.
-m_vals <- log2( beta_vals / (1-beta_vals) )
-
-
-# No need to squeeze beta values away from the boundaries: (y(n - 1) + 0.5) / n
-# n_obs     <- ncol(beta_vals)
-# beta_vals <- (beta_vals * (n_obs - 1) + 0.5) / n_obs
-
-betadf <- data.frame(beta_vals) |> 
-      tibble::rownames_to_column(var = "id") |> 
-      dplyr::select(id, starts_with("GSM")) 
-      
-mdf <- data.frame(m_vals) |> 
-      tibble::rownames_to_column(var = "id") |> 
-      dplyr::select(id, starts_with("GSM"))
-
-```
-
-
-
-
 ### Type I and II error rates permutation study
-
-**Scripts have moved to `analysis/R/methylation-error-permutation.R`.**
 
 Next, we will compare the models using Type I and II error rates determined from permutation of within-participant relabeled data. This relabeling establishes a null distribution for statistical tests performed using the *within-participant design*. The design keeps the within-participant correlation.
 
@@ -583,26 +548,80 @@ We will perform the experiment on permutated data from a subset of genomic sites
 
 The permutation loop below produces two results from a single set of model fits. A fixed number of sites is sampled from each &beta;-value stratum. Within every permutation, a subset of those sites receives a *known* effect (adding a known average effect) while the remainder are left untouched. Sites without an effect estimate the *type I error rate*, sites with an effect estimate *power*. This will also give us an estimate of the *false discovery proportion*.
 
-We will use the *M-value scale* to add the effect to permutated data with effect assignment *redrawn in every permutation*. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and exactly the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization.
+We will use the *M-value scale* to add the effect to permutated data with effect assignment *redrawn in every permutation*. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and proportionally to &delta;&times;log(2) for the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization. 
 
-The effect sizes are multiplied by 1 or -1 in a balanced fashion to create the direction of the effect. At an extreme site (&beta;-values close to 0 or 1), adding or subtracting &delta; will either compress towards the boundary or move estimates towards 0.5. Since these scenarios are not equally detectable and the two models disagree about the variance function in extreme regions, we can evaluate the effect of selecting one model over the other.
+In the code chunk below, a single site is used to show the workflow. &beta; values are calculated from the `gset` object and transformed to M values. We are using the first row of the M valu matrix and join the values with the meta data.  
+
+Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta;=0.8) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both models are fitted.  
 
 
+```{r}
 
-### The permutation loop
+beta_vals <- getBeta(gset, offset = 100)
+m_vals <- log2(beta_vals / (1 - beta_vals))
 
-Each iteration writes a single RDS file, completed iterations are not refitted. The seed is set per iteration so that any single permutation can be reproduced on its own.
+y <- data.frame(y = m_vals[1,]) |> 
+      tibble::rownames_to_column(var = "geo_accession" ) 
 
------ THIS IS WHERE I AM -----------------
+set.seed(1)
+dat <- metadata |> 
+      select(geo_accession, participant, time) |> 
+      inner_join(y) |>
+      group_by(participant) |> 
+      mutate(time_permute = sample(time, replace = FALSE)) |> 
+      ungroup() |> 
+      mutate(msim = if_else(time_permute == "3_loading", 
+             y + 0.8, y), 
+             betasim = plogis(msim * log(2))) 
+
+
+m_mod <- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
+                          data = dat)
+
+beta_mod <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
+                          data = dat, 
+                          family = glmmTMB::beta_family)
+
+es_mmod <- coef(summary(m_mod))$cond["time_permute3_loading","Estimate"]
+es_betamod<- coef(summary(beta_mod))$cond["time_permute3_loading","Estimate"]
+
+
+es_betamod <- es_betamod / log(2)
+```
+
+The estimated effects (`r round(es_mmod,2)` and `r round(es_betamod,2)`) for the model on M-values and &beta; values respectively are comparable but will differ due to compression in the &beta; values model.
+
+The fixed effect sizes are multiplied by 1 or -1 in a balanced fashion to create the direction of the effect. At an extreme site (&beta;-values close to 0 or 1), adding or subtracting &delta; will either compress towards the boundary or move estimates towards 0.5. Since these scenarios are not equally detectable and the two models disagree about the variance function in extreme regions, we can evaluate the effect of selecting one model over the other.
+
+The source code for estimation of Type I and II error rates using a permutation experiment can be run in full using the script `analysis/R/methylation-error-permutation.R`. Below we check if files are available from a previous run, if not the script runs and stores data in `analysis/data/derived_data/permutation/`. 
+
+
+```{r}
+
+# list files in permutation results folder
+out_dir <- here::here("analysis/data/derived_data/permutation")
+perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
+
+if (length(perm_files) == 0) source(
+      here::here("analysis/R/methylation-error-permutation.R")
+      )
+
+```
 
 ### Loading permutation study results
+
+@tbl-permutation-evals shows the number of failed models among all model fits for the two model types. A total of 250 sets of permutations where performed with 1000 sites in each set over 5 &beta; value strata.
 
 
 ```{r}
 #| label: reading-permutation-data
-#| eval: false
+#| eval: true
+#| label: tbl-permutation-evals
 
 ### Reading the results back
+
+spike_time <- "3_loading"
+
 perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
 perm       <- lapply(perm_files, readRDS)
 
@@ -612,16 +631,14 @@ perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
 
 # Which coefficients with the simulated effect.
 #
-# The spike shifts only the samples labelled `spike_time` under the permuted
-# labels. With 1_baseline as the reference level, the only contrast with a
-# non-zero true value is the one against spike_time. For a site with simulated
-# effects in spike_time, all other parameters (2_acute, 4_unloading and 
-# 5_reloading) are still null. The omnibus
-# LRT is an alternative on a spiked site, because the time factor as a whole
-# does have an effect.
+# The added effect shifts only the samples labelled `spike_time` under the 
+# permuted labels. `spike_time` is set to 3_loading and
+# 1_baseline is the reference level.
+
+# alt_terms also accepts and omnibus test (not used here)
 alt_terms <- c(paste0("time_permute", spike_time), "time_omnibus")
 
-# Attach the per-iteration truth (delta, sign, stratum) to every test.
+# Attach the per-iteration effects (delta, sign, stratum) to every test.
 # is_alt is ground truth for a (site, term) pair, not for a site.
 perm_dat <- perm_summaries |>
       dplyr::inner_join(perm_designs,
@@ -634,28 +651,24 @@ stopifnot(any(perm_dat$is_alt))
 
 # Convergence failures are dropped silently by seqwrap_summarise (NULL entries
 # are removed before rbind), so differential failure between the two models
-# would quietly change what is being compared. Report it.
+# would quietly change what is being compared.
+
 perm_evals |>
       dplyr::summarise(.by = c(model),
                        n_fits     = dplyr::n(),
                        n_fail     = sum(convergence != 0 | !pdHess),
-                       prop_fail  = mean(convergence != 0 | !pdHess))
-
-
+                       prop_fail  = mean(convergence != 0 | !pdHess)) |> 
+      gt()
 ```
 
-### Type I error rate
 
-Calibration is measured on the unspiked sites only. The unaffected contrasts on a
-*spiked* site are nominally null too, but adding the effect changes the fitted mean
-of one group, and under the beta likelihood the variance is a function of the mean --
-so the shared dispersion parameter, and with it the other contrasts, are mildly
-perturbed. Those tests are excluded from the reference distribution rather than
-pooled into it.
+### Calibration under the null
+
+The type I error rates are estimated from sites without added effects. The unaffected contrasts on a site with an added effect are nominally null, but a spiked site is not exchangeable with an unspiked one on *any* contrast: adding the effect changes the fitted mean of one time-point, and because the design is unbalanced (8/8/8/7/7 samples per time-point, with one participant contributing only three samples) the shift is not orthogonal to the estimated variance components. Under the &beta; likelihood the variance is in addition a function of the mean, so the common dispersion parameter, and with it the other contrasts, is affected as well. 
 
 ```{r}
-#| label: permutation-type1
-#| eval: false
+#| label: fig-permutation-type1
+#| eval: true
 
 null_dat <- perm_dat |> dplyr::filter(delta == 0)
 
@@ -664,30 +677,112 @@ t1e <- null_dat |>
                        n      = dplyr::n(),
                        a_05   = mean(p.value < 0.05, na.rm = TRUE),
                        a_01   = mean(p.value < 0.01, na.rm = TRUE),
-                       a_001  = mean(p.value < 0.001, na.rm = TRUE))
+                       a_001  = mean(p.value < 0.001, na.rm = TRUE)) 
+
+
+t1e |> 
+      ggplot(aes(betacat,  100 * a_05, fill = model))  +
+      geom_point(shape = 21, 
+                 position = position_jitter(width = 0.1)) +
+      scale_y_continuous(limits = c(0, 10)) +
+      geom_hline(yintercept = 5, color = "gray", 
+                 lty = 2) +
+      theme_classic() + 
+      labs(x = "&beta; strata", 
+           y = "Type I error rates (%)") + 
+      theme(axis.title.x = ggtext::element_markdown())
+      
 
 
 # Null p-value distribution by stratum
-null_dat |>
-      ggplot(aes(sample = p.value)) +
-      stat_qq(distribution = stats::qunif) +
-      stat_qq_line(distribution = stats::qunif) +
-      facet_grid(betacat ~ model) +
-      labs(x = "Expected quantile (uniform)", y = "Observed p-value")
+
+
+#null_dat |>
+#      ggplot(aes(sample = p.value)) +
+#      stat_qq(distribution = stats::qunif) +
+#      stat_qq_line(distribution = stats::qunif) +
+#      facet_grid(betacat ~ model) +
+#      labs(x = "Expected quantile (uniform)", y = "Observed p-value")
 
 ```
 
-### Power at matched empirical size
+The two models are both miscalibrated (~ 2-3 %-points) in terms of type I errors (@fig-permutation-type1).
 
-Comparing power at the nominal 5% level is confounded by size: a model whose actual
-type I error is 7% will appear more powerful simply because it rejects more of
-everything. The empirical 5% quantile of the null p-values, taken per model and
-stratum from the *same* permutations, is used as the critical value instead, so both
-models are compared while operating at exactly 5% empirical size.
+The miscalibration is not confined to conventional significance levels. It grows as the threshold is lowered, and it is in the extreme tail that a multiple-testing correction operates (@tbl-permutation-nulltail).
 
 ```{r}
-#| label: permutation-power
-#| eval: false
+#| label: tbl-permutation-nulltail
+#| tbl-cap: "Observed proportion of null p-values below increasingly stringent thresholds. Valid p-values would give `observed` equal to `threshold`; `inflation` is the ratio of the two. The Benjamini-Hochberg step at *q* = 0.05 over a family of *m* tests cannot reject at all unless the smallest p-value falls below *q*/*m*, which is 6.25 &times; 10<sup>-5</sup> for the families used below."
+#| eval: true
+
+# Complete-null tests: contrasts that never receive a spike, on sites that
+# carry no effect on any contrast.
+null_p <- perm_dat |>
+      dplyr::filter(!term %in% alt_terms, delta == 0)
+
+dplyr::bind_rows(lapply(c(1e-3, 1e-4, 6.25e-5, 1e-5), function(t)
+      null_p |>
+            dplyr::summarise(.by = model,
+                             threshold = t,
+                             observed  = mean(p.value < t, na.rm = TRUE),
+                             inflation = mean(p.value < t, na.rm = TRUE) / t))) |>
+      tidyr::pivot_wider(names_from = model,
+                         values_from = c(observed, inflation)) |>
+      gt() |>
+      gt::fmt_scientific(columns = c(threshold, dplyr::starts_with("observed")),
+                         decimals = 2) |>
+      gt::fmt_number(columns = dplyr::starts_with("inflation"), decimals = 1)
+```
+
+The consequence can be read directly from the contrasts that never receive a simulated effect. Once spiked sites are removed these form a *complete null*: every hypothesis in the family is true, so every rejection is false, FDP is 1 whenever anything is rejected, and the false discovery rate reduces to the probability of any rejection at all. Benjamini-Hochberg bounds this by *q*, and the bound is essentially attained under valid p-values -- for *m* = 800 and *q* = 0.05, $1 - (1 - q/m)^m$ = 0.049 (@tbl-permutation-nullbh).
+
+```{r}
+#| label: tbl-permutation-nullbh
+#| tbl-cap: "Benjamini-Hochberg applied to complete-null families of `size * 5 * (1 - pi1)` sites, one per model, contrast and permutation. `p_any` is the realised false discovery rate and is bounded by *q* = 0.05. `p_any_indep` is what `mean_R` would imply if the tests within a family were independent; the gap between the two measures how strongly rejections cluster. `p_any_t` repeats the identical procedure after replacing the Wald *z* reference with a *t* reference on the effective degrees of freedom."
+#| eval: true
+
+null_families <- null_p |>
+      # BH must be re-run on this subset: the stored qval was adjusted against
+      # the full `size * 5` family and no longer applies. The same tests are
+      # also referred to a t distribution on the effective degrees of freedom
+      # (df = 12, the value that restores nominal size above) rather than the
+      # Wald z that glmmTMB reports, holding everything else fixed.
+      dplyr::mutate(.by = c(model, term, iter),
+                    qval_null = stats::p.adjust(p.value, method = "BH"),
+                    p_t       = 2 * stats::pt(-abs(estimate / std.error), df = 12),
+                    qval_t    = stats::p.adjust(p_t, method = "BH")) |>
+      dplyr::summarise(.by = c(model, term, iter),
+                       m_tests = dplyr::n(),
+                       R       = sum(qval_null < 0.05, na.rm = TRUE),
+                       R_t     = sum(qval_t < 0.05, na.rm = TRUE))
+
+null_families |>
+      dplyr::summarise(.by = model,
+                       n_families = dplyr::n(),
+                       m_tests    = unique(m_tests),
+                       mean_R     = mean(R),
+                       p_any      = mean(R > 0),
+                       # Under independence P(any) would follow from mean_R
+                       # alone; the observed value is far smaller because all
+                       # sites in a family share one permuted design.
+                       p_any_indep     = 1 - exp(-mean(R)),
+                       max_R           = max(R),
+                       mean_R_when_any = mean(R[R > 0]),
+                       p_any_t         = mean(R_t > 0)) |>
+      gt() |>
+      gt::fmt_number(decimals = 3)
+```
+
+Both models reject at least one true null in roughly a third of permutations, against a bound of 5 %. The failures are not a steady trickle: most families contain no rejection at all, while those that do contain several at once and occasionally more than a hundred, because every site in a family is fit against the same relabelling. Referring the identical tests to a *t* distribution on the effective degrees of freedom removes the excess entirely, which identifies the Wald reference distribution rather than the multiplicity correction as the cause. This is a property of Wald inference in a mixed model with eight participants, and both scales inherit it equally.
+
+
+### Power at matched empirical size
+
+Comparing power at the nominal 5% level is confounded by test size: a model whose actual type I error rate is 8% will appear more powerful simply because it calls more sites as differentially methylated irrespective of the simulated truth. Here we use the empirical 5% quantile of the null p-values, taken per model, contrast and stratum from the same permutations, as the critical value. Both models are therefore compared while operating at exactly 5% empirical size. Note that this matches the models on type I error rather than on the false discovery rate, which depends on the proportion of true alternatives in the family and is therefore a property of the experiment rather than of the model.
+
+```{r}
+#| label: fig-permutation-power
+#| eval: true
 
 crit <- null_dat |>
       dplyr::summarise(.by = c(model, term, betacat),
@@ -709,7 +804,7 @@ power_dat <- perm_dat |>
 # Power against the signed effect. At the extreme strata the two directions are
 # not equally detectable -- an upward spike at an xhigh site compresses towards
 # the boundary -- so asymmetry about zero is a result, not noise.
-power_dat |>
+p1 <- power_dat |>
       ggplot(aes(delta, power_matched, colour = model)) +
       geom_line(position = position_dodge(width = 0.02)) +
       geom_point(position = position_dodge(width = 0.02)) +
@@ -720,7 +815,7 @@ power_dat |>
            colour = "Model")
 
 # Pooled over direction
-power_dat |>
+p2 <- power_dat |>
       dplyr::summarise(.by = c(model, term, betacat, delta_abs),
                        power_matched = stats::weighted.mean(power_matched, n),
                        n = sum(n)) |>
@@ -732,68 +827,90 @@ power_dat |>
       labs(x = "Simulated effect (M-value units, magnitude)",
            y = "Power at 5% empirical size",
            colour = "Model")
+
+
+cowplot::plot_grid(p1, p2, ncol = 1)
+
 ```
 
-### Realised false discovery proportion
+Models are comparable in terms of power (@fig-permutation-power). 
 
-Because true nulls and true alternatives are present in the same family of tests,
-the Benjamini-Hochberg step can be scored directly. Note that this is a statement
-about a family of `size * 5` sites, not about the full array: the BH threshold for
-the smallest p-value scales with the number of tests, so this does not certify FDR
-control at the ~700,000-site scale.
 
-```{r}
-#| label: permutation-fdp
-#| eval: false
-
-# Only the families that contain true alternatives can be scored as an FDR.
-# A false discovery is a rejection of a (site, term) pair that is not is_alt.
-fdp <- perm_dat |>
-      dplyr::filter(term %in% alt_terms) |>
-      dplyr::summarise(.by = c(model, term, iter),
-                       R   = sum(qval < 0.05, na.rm = TRUE),
-                       V   = sum(qval < 0.05 & !is_alt, na.rm = TRUE),
-                       FDP = ifelse(R > 0, V / R, 0))
-
-fdp |>
-      dplyr::summarise(.by = c(model, term),
-                       n_iter    = dplyr::n(),
-                       mean_R    = mean(R),
-                       FDR       = mean(FDP))
-
-# The remaining contrasts are complete nulls -- no site carries an effect on
-# them -- so every discovery is false and FDP is 1 whenever anything is
-# rejected. There the quantity of interest is P(at least one rejection), which
-# BH bounds by q under the complete null.
-perm_dat |>
-      dplyr::filter(!term %in% alt_terms) |>
-      dplyr::summarise(.by = c(model, term, iter),
-                       R = sum(qval < 0.05, na.rm = TRUE)) |>
-      dplyr::summarise(.by = c(model, term),
-                       n_iter = dplyr::n(),
-                       p_any  = mean(R > 0))
-```
 
 ### Agreement between the two models
 
-```{r}
-#| label: permutation-agreement
-#| eval: false
+Type I error rates and power are averages over sites, and two models can match on both while disagreeing site by site. The permutation output allows the stronger, paired comparison: every site in every permutation is fit by both models, so their estimates and their p-values can be compared directly.
 
-perm_dat |>
-      dplyr::filter(delta != 0) |>
-      dplyr::select(iter, target, term, betacat, model,estimate, p.value) |>
-      tidyr::pivot_wider(names_from = model, values_from = c(estimate,p.value)) |>
-      
-      print()
-      
-      ggplot(aes(-log10(m), -log10(beta))) +
-      geom_point(alpha = 0.2) +
-      geom_abline(slope = 1, intercept = 0) +
-      facet_wrap(~ betacat) +
-      labs(x = "M-value model, -log10(p)",
-           y = "Beta model, -log10(p)")
+```{r}
+#| label: tbl-permutation-agreement
+#| tbl-cap: "Paired agreement between the two models on the spiked contrast, by &beta; stratum, separately for sites that received an effect and sites that did not. Estimates are compared after returning the &beta; coefficient to M-value units. `mad_` columns are mean absolute differences and `p90_logp` is the 90th percentile of the absolute difference in -log<sub>10</sub>(p). `discordant` is the proportion of sites the two models classify differently with each operating at its own 5% empirical size."
+#| eval: true
+
+# Each model is held at its own size-matched critical value, so a discordant
+# call reflects the models disagreeing rather than one of them rejecting more.
+crit_w <- crit |>
+      dplyr::filter(term == paste0("time_permute", spike_time)) |>
+      dplyr::select(-term) |>
+      tidyr::pivot_wider(names_from = model, values_from = crit,
+                         names_prefix = "crit_")
+
+agree <- perm_dat |>
+      dplyr::filter(term == paste0("time_permute", spike_time)) |>
+      dplyr::select(iter, target, betacat, delta, model, estimate, p.value) |>
+      tidyr::pivot_wider(names_from = model, values_from = c(estimate, p.value)) |>
+      dplyr::inner_join(crit_w, by = "betacat") |>
+      # The beta coefficient is a shift on the natural-log logit scale; dividing
+      # by log(2) returns it to M-value units and makes the two comparable.
+      dplyr::mutate(estimate_beta_M = estimate_beta / log(2),
+                    lp_beta = -log10(p.value_beta),
+                    lp_m    = -log10(p.value_m),
+                    truth   = ifelse(delta == 0, "null", "spiked"))
+
+agree |>
+      dplyr::summarise(.by = c(truth, betacat),
+                       n            = dplyr::n(),
+                       r_estimate   = cor(estimate_beta_M, estimate_m),
+                       mad_estimate = mean(abs(estimate_beta_M - estimate_m)),
+                       r_logp       = cor(lp_beta, lp_m),
+                       mad_logp     = mean(abs(lp_beta - lp_m)),
+                       p90_logp     = stats::quantile(abs(lp_beta - lp_m), 0.9),
+                       discordant   = mean((p.value_beta < crit_beta) !=
+                                           (p.value_m < crit_m))) |>
+      dplyr::arrange(truth, factor(betacat,
+                                   c("xlow", "low", "mid", "high", "xhigh"))) |>
+      gt() |>
+      gt::fmt_number(decimals = 4)
 ```
+
+Once the &beta; coefficient is returned to M-value units the two models recover the same effect: on sites carrying an effect the estimates correlate at *r* &ge; 0.9987 in every stratum and differ by 0.005 to 0.013 M units on average, against simulated effects of 0.1 to 0.8 (@tbl-permutation-agreement). The disagreement between the models is confined to the standard errors, and therefore to the p-values.
+
+That disagreement is smallest in the middle of the &beta; range and grows towards both boundaries. On spiked sites the mean absolute difference in -log~10~(p) is 0.098 at `mid` against 0.46 at `xlow` and 0.58 at `xhigh`, and for the most extreme decile of `xhigh` sites the two models differ by more than 1.8 orders of magnitude (@fig-permutation-agreement). It also scales with the size of the effect: on unspiked sites the same quantity is 0.006 at `mid` and 0.020 to 0.037 elsewhere, roughly an order of magnitude smaller throughout. Both patterns are what the &beta; variance function predicts. The &beta; likelihood weights an observation by $\mu(1-\mu)/(1+\phi)$ while the Gaussian model weights every observation equally, so the two separate only where the fitted mean approaches 0 or 1 -- and a simulated effect at an already extreme site pushes it further into exactly that region.
+
+```{r}
+#| label: fig-permutation-agreement
+#| fig-cap: "Paired -log<sub>10</sub>(p) for sites carrying a simulated effect, by &beta; stratum and by the direction of the effect. The line is the identity. The two models agree closely in the middle strata and fan out symmetrically towards both &beta; boundaries."
+#| eval: true
+
+agree |>
+      dplyr::filter(truth == "spiked") |>
+      dplyr::mutate(betacat = factor(betacat,
+                                     c("xlow", "low", "mid", "high", "xhigh")),
+                    direction = factor(sign(delta), levels = c(-1, 1),
+                                       labels = c("Downward", "Upward"))) |>
+      ggplot(aes(lp_m, lp_beta, color = direction)) +
+      geom_abline(slope = 1, intercept = 0, colour = "gray") +
+      geom_point(alpha = 0.2) +
+      facet_wrap(~ betacat, nrow = 1) +
+      scale_colour_manual(values = colors) +
+      theme_classic() +
+      labs(x = "M-value model, -log<sub>10</sub>(p)",
+           y = "&beta; model, -log<sub>10</sub>(p)",
+           colour = "Effect direction") +
+      theme(axis.title.x = ggtext::element_markdown(),
+            axis.title.y = ggtext::element_markdown())
+```
+
+The practical consequence is modest. With each model held at its own 5 % empirical size, the two disagree about whether to call a spiked site in 0.35 % of cases at `mid`, rising to 0.8 to 1.8 % in the other strata -- the same pattern, two- to fivefold, but on a base rate low enough that the choice of scale rarely changes a conclusion. The models differ in how confidently they speak, not in what they say.
 
 
 
@@ -831,19 +948,18 @@ beta_time <- round(beta_time[3] /60 /60, 1)
 m_time <- round(m_time[3] /60 /60, 1)
 
 # Number of sucessfull models 
-beta_errors_sum <- sapply(beta_model_full@errors, function(x) sum(!sapply(x, is.null)))
-m_errors_sum <- sapply(m_model_full@errors, function(x) sum(!))
-
-rm(beta_model_full)
-rm(m_model_full)
-
-gc()
 
 
-# What were the errors
-m_warnings <- m_model_full@errors |> 
-      filter(!sapply(warnings_fit, is.null)) |> 
-      pull(warnings_fit) 
+############# NEEDS FIX ##########################
+
+beta_model_full@errors
+
+
+
+m_model_full@errors |> 
+      distinct(message)
+      print()
+
 
 ```
 
@@ -867,8 +983,10 @@ beta_model_sum$summaries |>
       mutate(.by = term, 
              qval = p.adjust(p.value, method = "fdr")) |> 
       
-      filter(term == "time3_loading") |> 
-      
+      filter(term == "time3_loading")  |> 
+      filter(qval < 0.05) |> 
+      arrange(qval)
+       
 
 
 
@@ -879,12 +997,10 @@ m_model_sum$summaries |>
       mutate(.by = term, 
              qval = p.adjust(p.value, method = "fdr")) |> 
       
-      filter(term == "time4_unloading") |> 
-      filter(p.value < 0.05) |> 
-      mutate(direction = if_else(sign(estimate) > 0, "pos", "neg")) |> 
-      summarise(.by = direction, 
-                n = n())
-
+      filter(term == "time3_loading") |> 
+      filter(qval < 0.05) |> 
+      arrange(qval)
+   
 
 # Read seaborn data 
 sdat <- readxl::read_excel(

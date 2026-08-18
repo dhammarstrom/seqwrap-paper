@@ -139,11 +139,11 @@ Once pre-processed data are organized in a data frame, target identifiers are ex
 
 [An optional `targetdata` argument allows inclusion of target-specific metadata in addition to the standard sample `metadata`. Whereas sample metadata remain constant across model iterations, `targetdata` provides information that varies by target. Examples include fixed dispersion estimates obtained from preliminary analyses or prior parameter values used for regularization in maximum a posteriori (MAP) estimation. This separation of sample-level and target-level information facilitates efficient modeling while supporting advanced workflows that require target-specific parameters or annotations.]{custom-style="edits"}
 
-## Core functions of seqwrap
+### Core functions of seqwrap
 
 [The package implements three core functions, `seqwrap_compose`, `seqwrap`, and `seqwrap_summarise`, corresponding to the composition, iterative fitting, and aggregation stages of the workflow (@fig-overview).]{custom-style="edits"}
 
-### seqwrap_compose
+#### seqwrap_compose
 
 [`seqwrap_compose` assembles all required inputs for model fitting into a validated `swcontainer` object, which serves as the primary input to `seqwrap` for iterative model fitting. Required inputs include the high-dimensional data (a data frame or list of data frames, as described above), the sample metadata, the name of the sample identifier variable (`samplename`), the model-fitting function (`modelfun`, e.g., `glmmTMB::glmmTMB` or `stats::lm`), and a list of arguments to be passed to the model fitting function (`arguments`).These arguments must follow the conventions and syntax expected by the selected modelling framework.]{custom-style="edits"}
 
@@ -153,7 +153,7 @@ Once pre-processed data are organized in a data frame, target identifiers are ex
 
 
 
-### seqwrap
+#### seqwrap
 
 [`seqwrap` is the central function of the package, performing iterative, target-by-target model fitting using the validated `swcontainer` object produced by `seqwrap_compose`. Although the recommended workflow is to supply a pre-validated `swcontainer` object,`seqwrap` can also accept the corresponding arguments directly. This alternative approach bypasses the validation procedures implemented in `seqwrap_compose` and is therefore generally discouraged except in advanced use cases.]{custom-style="edits"}
 
@@ -161,7 +161,7 @@ Once pre-processed data are organized in a data frame, target identifiers are ex
 
 [For each target, `seqwrap` merges the data and corresponding metadata, fits the specified models, and evaluates the fitted object using the applicable summary and evaluation functions. During execution, progress indicators are displayed to provide feedback on completion status and elapsed runtime. These diagnostics can be particularly informative when comparing alternative modelling strategies or assessing the computational demands of large analyses. `seqwrap` implements robust error handling to support high-throughput workflows. Rather than terminating the entire analysis when a single model fit fails, it catches errors encountered during fitting for individual targets and stores them separately, allowing the batch job to continue across the remaining targets. Models that fail to converge or otherwise do not produce valid outputs are excluded from model summaries, ensuring that unsuccessful fits do not disrupt the overall analysis `seqwrap` outputs a `seqwrap_results` object whose components include fitted model results (if `return_models` = `TRUE`), model summaries, evaluation outputs and recorded errors with consistent indexing: results for any given target can be cross-referenced by its index, allowing the model, its summary, its evaluation, and any associated error to be inspected. This indexing makes it practical to iterate systematically across the full target set when reviewing results or diagnosing fitting issues. This design facilitates systematic review of large-scale analyses, simplifies troubleshooting, and supports transparent reporting of modelling results. As a result, convergence failures, optimization warnings, and other fitting issues can be examined.]{custom-style="edits"}
 
-### seqwrap_summarise
+#### seqwrap_summarise
 
 [The `seqwrap_summarise` function provides the final aggregation step in the package. It recieves as input the results object returned by `seqwrap` and consolidates its per-target structure into two flat, tabular dataframes; one containing model summaries and the other model evaluation results. These aggregated outputs are designed for direct use in downstream analyses and reporting. Upon execution, `seqwrap_summarise` generates a concise report describing the completed analysis. This report includes the number of samples and targets analysed, the model-fitting function and associated arguments used, and counts of targets for which summaries, evaluations, errors, or warnings were returned. These diagnostics provide a high-level overview of model performance and allow users to rapidly assess the completeness and quality of the analysis. By transforming the indexed, per-target output generated into standard tidy dataframes, `seqwrap_summarise` simplifies downstream statistical workflows. Common post-processing tasks, such as filtering results, ranking targets, applying multiple-testing corrections, or generating visualisations, can be performed directly using conventional data manipulation tools without requiring manual iteration over nested list structures. This design promotes interoperability with the broader R ecosystem and enables efficient analysis of large-scale high-dimensional data sets.]{custom-style="edits"}. 
 
@@ -199,9 +199,9 @@ m1.1_evaluations <- m1.1_temp_sum$evaluations # to generate the evaluation repor
 m1.1_summaries <- m1.1_temp_sum$summaries # to generate the model summaries
 ```
 
-### Case study
+## Case studies
 
-#### Data
+### Analysis of RNA-seq data
 
 Pillon et al. [@pillon2022] investigated gene expression profiles in individuals with type 2 diabetes and healthy control individuals in response to a standardized exercise session. RNA was extracted from muscle biopsy samples obtained before, immediately after, and after a 3-hour recovery (two groups, three time-points). Paired-end RNA-sequencing was performed, and the data were submitted to the Gene Expression Omnibus (GSE202295). Here we have downloaded the available raw counts matrix data, which has been processed into counts from raw reads by NCBI. Raw read counts were filtered to retain target genes with at least 10 counts in 70% of samples for each group-time-point combination.
 
@@ -278,6 +278,76 @@ b_{g,j} &\sim \operatorname{Normal}(0, \sigma_g) \\
 $$ {#eq-model-3}
 
 Here, we used the `glmmTMB` package [@brooks2017a] to fit models that produce *maximum a posteriori* estimates after applying independent priors on selected parameters. Because our `seqwrap` package makes target-specific data available at each iteration, we can specify target-specific priors for the negative binomial model, and common priors used in the Poisson OLRE model (see the supplementary data for a complete code example).
+
+### Analysis of DNA methylation array data
+
+```{r}
+#| label: case-methylation-description
+#| echo: false
+
+
+# The GEO ID
+gse_id   <- "GSE114763"
+# Download directories for the methylation data
+raw_dir  <- here::here("analysis/data/raw_data", gse_id)
+pheno_file <- file.path(raw_dir, "pheno_raw.rds")
+
+# Metadata
+metadata <- readRDS(pheno_file)
+
+# Get sample metadata into text
+sample_metadata <- metadata |> 
+      
+      summarise(.by = participant, 
+                weight = mean(weight), 
+                height = mean(height), 
+                age = mean(age)) |> 
+      pivot_longer(weight:age) |> 
+      summarise(.by = name, 
+                m = mean(value), 
+                s = sd(value)) |> 
+      mutate(unit = c("kg", "cm", "years")) |> 
+      mutate(stat = paste0(sprintf("%.1f", round(m, 1)), 
+                           " (", 
+                           sprintf("%.1f", round(s, 1)), 
+                           ") ", 
+                           unit)) 
+
+age <- filter(sample_metadata, name == "age") |> pull(stat)
+height <- filter(sample_metadata, name == "height") |> pull(stat)
+weight <- filter(sample_metadata, name == "weight") |> pull(stat)
+
+```
+
+[Seaborne et al. [@seaborne2018;@seaborne2018b] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this aim, previously untrained male participants (age, [mean (SD)] `r age`; weight, `r weight`; height, `r height`) completed a sequential design with two seven-week periods of resistance-exercise training (RET) intersected with a 7-week unloading period without RET. RET periods included two weekly sessions targeting lower limbs (seven exercises) and one weekly session targeting the upper body (5 exercises; 4 sets of 10 repetitions per exercise). Skeletal muscle biopsies were sampled from m. vastus lateralis on five occasions: before the intervention, 30 min after the first exercise session, and after the completion of each of the 7-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Kit, Qiagen, Manchester, UK) and bisulfite converted before amplification, fragmentation, and hybridization using the Illumina Infinium Human MethylationEPIC Beadchip protocol [@seaborne2018;@seaborne2018b].]{custom-style="edits"}
+
+
+```{r}
+#| echo: false
+
+# Count the number of probes in the final data set. 
+gset <- readRDS(
+    here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
+  )
+
+probes <- dim(gset)[1]
+
+
+```
+
+
+[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Raw files were read and normalized (functional normalization [@fortin2014]) before filtering. Probes were removed from the data set if they (1) failed detection in any retained sample, (2) contained overlap with common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the `maxprobes` package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` remained for analysis.]{custom-style="edits"}
+
+For each sample and CpG site, a methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent of the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate percentage of CpG sites methylated, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values are commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is absent of boundary effects and has been shown to to have favorable statistical properties when a statistical model assuming homoscedasticity is applied [@du2010]. However, the &beta; values could appropriately be modeled using Beta regression, e.g., as implemented in the glmmTMB package. We therefore evaluated the characteristics of ...  
+
+
+
+
+
+
+
+
+
 
 ## Results
 
