@@ -156,3 +156,19 @@
   langid = {english},
   file = {C:\Users\706194\Zotero\storage\WID4P7EE\Du et al. - 2010 - Comparison of Beta-value and M-value methods for quantifying methylation levels by microarray analys.pdf}
 }
+
+@article{ferrari2004,
+  title = {Beta {{Regression}} for {{Modelling Rates}} and {{Proportions}}},
+  author = {Ferrari, Silvia and {Cribari-Neto}, Francisco},
+  year = 2004,
+  month = aug,
+  journal = {Journal of Applied Statistics},
+  volume = {31},
+  number = {7},
+  pages = {799--815},
+  issn = {0266-4763},
+  doi = {10.1080/0266476042000214501},
+  abstract = {This paper proposes a regression model where the response is beta distributed using a parameterization of the beta law that is indexed by mean and dispersion parameters. The proposed model is useful for situations where the variable of interest is continuous and restricted to the interval (0, 1) and is related to other variables through a regression structure. The regression parameters of the beta regression model are interpretable in terms of the mean of the response and, when the logit link is used, of an odds ratio, unlike the parameters of a linear regression that employs a transformed response. Estimation is performed by maximum likelihood. We provide closed-form expressions for the score function, for Fisher's information matrix and its inverse. Hypothesis testing is performed using approximations obtained from the asymptotic normality of the maximum likelihood estimator. Some diagnostic measures are introduced. Finally, practical applications that employ real data are presented and discussed.},
+  file = {C:\Users\706194\Zotero\storage\7ED2FTKD\Ferrari-2004-Beta Regression for Modelling Rat.pdf}
+}
+

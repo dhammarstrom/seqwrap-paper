@@ -293,11 +293,10 @@ raw_dir  <- here::here("analysis/data/raw_data", gse_id)
 pheno_file <- file.path(raw_dir, "pheno_raw.rds")
 
 # Metadata
-metadata <- readRDS(pheno_file)
+participant_data <- readRDS(pheno_file)
 
 # Get sample metadata into text
-sample_metadata <- metadata |> 
-      
+sample_metadata <- participant_data |> 
       summarise(.by = participant, 
                 weight = mean(weight), 
                 height = mean(height), 
@@ -319,11 +318,13 @@ weight <- filter(sample_metadata, name == "weight") |> pull(stat)
 
 ```
 
-[Seaborne et al. [@seaborne2018;@seaborne2018b] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this aim, previously untrained male participants (age, [mean (SD)] `r age`; weight, `r weight`; height, `r height`) completed a sequential design with two seven-week periods of resistance-exercise training (RET) intersected with a 7-week unloading period without RET. RET periods included two weekly sessions targeting lower limbs (seven exercises) and one weekly session targeting the upper body (5 exercises; 4 sets of 10 repetitions per exercise). Skeletal muscle biopsies were sampled from m. vastus lateralis on five occasions: before the intervention, 30 min after the first exercise session, and after the completion of each of the 7-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Kit, Qiagen, Manchester, UK) and bisulfite converted before amplification, fragmentation, and hybridization using the Illumina Infinium Human MethylationEPIC Beadchip protocol [@seaborne2018;@seaborne2018b].]{custom-style="edits"}
+[Seaborne et al. [@seaborne2018;@seaborne2018b] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this purpose, eight previously untrained male participants (mean (SD): age, `r age`; weight, `r weight`; height, `r height`) completed a sequential protocol with two seven-week periods of resistance-exercise training (RET) separated by a seven-week unloading period without RET. RET periods included two weekly sessions targeting the lower limbs and one weekly session targeting the upper body (seven and five exercises, respectively; four sets of ten repetitions per exercise). Skeletal muscle biopsies were sampled from *m. vastus lateralis* on five occasions: before the intervention, 30 min after the first exercise session, and after the completion of each of the seven-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Blood and Tissue Kit, Qiagen, Manchester, UK) and bisulfite-converted before amplification, fragmentation, and hybridization using the Illumina Infinium MethylationEPIC BeadChip protocol [@seaborne2018;@seaborne2018b].]{custom-style="edits"}
 
+#### Data preprocessing
 
 ```{r}
 #| echo: false
+#| label: read-gset-from-rds
 
 # Count the number of probes in the final data set. 
 gset <- readRDS(
@@ -336,18 +337,86 @@ probes <- dim(gset)[1]
 ```
 
 
-[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Raw files were read and normalized (functional normalization [@fortin2014]) before filtering. Probes were removed from the data set if they (1) failed detection in any retained sample, (2) contained overlap with common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the `maxprobes` package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` remained for analysis.]{custom-style="edits"}
+[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Files were read and normalized (functional normalization [@fortin2014]) before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
 
-For each sample and CpG site, a methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent of the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate percentage of CpG sites methylated, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values are commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is absent of boundary effects and has been shown to to have favorable statistical properties when a statistical model assuming homoscedasticity is applied [@du2010]. However, the &beta; values could appropriately be modeled using Beta regression, e.g., as implemented in the glmmTMB package. We therefore evaluated the characteristics of ...  
+[For each sample and CpG site, the methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to the denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a]. We therefore evaluated the characteristics of these modeling choices using a permutation experiment to evaluate the type I error rate and power together with inferential agreement between the two models. We also used the full data set [@seaborne2018] to show that seqwrap is able to fit a large number of targets (`r probes` CpG sites). ]{custom-style="edits"}
+
+#### Model building and permutation experiment
+
+[Two target models were formulated based on the experimental design with the same linear predictor ($\eta$) for CpG site *c* (*c* = 1, ..., *m*; the *m* rows of the `data` matrix) and observation *i* (*i* = 1, ..., *n*; the *n* sample columns of `data` and the number of rows in the metadata), with each observation belonging to a participant *j*[*i*] (*j* = 1, ..., *J*, *J* = 8). In the first model (@eq-model-m), M-values were assumed to follow a normal distribution with a conditional mean ($\mu_{ci}$) for each CpG site.  
+
+$$
+\begin{align}
+Y_{ci} &\sim \operatorname{Normal}(\mu_{ci}, \sigma_c) \\
+\mu_{ci} &= \eta_{ci} \\
+\eta_{ci} &= \mathbf{X}_{i} \boldsymbol{\beta}_c + b_{c,j[i]} \\
+b_{c,j} &\sim \operatorname{Normal}(0, \sigma_{c[\text{participant}]}) \\
+\end{align}
+$$ {#eq-model-m}
+
+In @eq-model-m, $\mathbf{X}_{i} \boldsymbol{\beta}_c$ expands to an intercept ($\beta_{0c}$) representing the site-specific mean in the reference sampling time-point, and parameters for indicator variables representing follow-up sampling time points ($\beta_{1c}$, 30 min after the first session; $\beta_{2c}$, after the first 7-week loading period; $\beta_{3c}$, after the unloading period, and; $\beta_{4c}$, after the reloading period). A participant- and site-specific intercept ($b_{c,j}$) accounted for the correlation between samples within participants and enabled parameters to be interpreted as within-participant comparisons between the reference and follow-up sampling time-points.
+
+The second model uses the beta regression model proposed by @ferrari2004 as implemented in glmmTMB [@brooks2017a]. 
+
+$$
+\begin{align}
+Y_{ci} &\sim \operatorname{Beta}(\mu_{ci}, \phi_c) \\
+\operatorname{logit}(\mu_{ci}) &= \eta_{ci} \\
+\eta_{ci} &= \mathbf{X}_{i} \boldsymbol{\beta}_c + b_{c,j[i]} \\
+b_{c,j} &\sim \operatorname{Normal}(0, \sigma_{c[\text{participant}]}) \\
+\end{align}
+$$ {#eq-model-beta}
+
+@eq-model-beta describes the beta model that uses a logit link to connect the linear predictor to the conditional mean ($\mu_{ci}$, $0 < \mu < 1$) and the precision parameter ($\phi_{c}$, $\phi > 0$) that determines the variance as $\operatorname{Var}(y) = \frac{\mu(1-\mu)}{1+\phi}$ [@ferrari2004].
+
+To fit the two models using the seqwrap package we first organize the methylation data matrix so that each row represent a specific CpG site. The first column of the data frame contains CpG site names and the following columns represents samples (`mdata` and `betadata`, respectively in the code example below). The `metadata` is organized to contain the factor variables needed to fit the model (participant and time-point identifications) together with a variable containing the sample name corresponding to the column names of the `data` data frame. Below we first illustrate how `seqwrap_compose` is used to organize the data and fitting arguments into a `swcontainer`. The container object is then used in `seqwrap` which iterate over the rows in the `data`, fits the models and combine the results. Finally, `seqwrap_summarise` is used to sort the results into a two summary tables, representing the results from a summary and an evaluation function, respectively. 
+
+```{r}
+#| eval: false
+#| echo: true
+
+# Preparing the swcontainer objects
+m_model <- seqwrap_compose(
+  modelfun = glmmTMB::glmmTMB,
+  data = mdata,
+  metadata = metadata,
+  samplename = "geo_accession",
+  arguments = list(
+    formula = y ~ time + (1 | participant)
+  )
+)
+
+beta_model <- seqwrap_compose(
+  modelfun = glmmTMB::glmmTMB,
+  data = betadata,
+  metadata = metadata,
+  samplename = "geo_accession",
+  arguments = list(
+    formula = y ~ time + (1 | participant),
+    family = glmmTMB::beta_family()
+  )
+)
+
+# Fitting the models
+m_model_results <- seqwrap(m_model, 
+                           cores = parallel::detectCores())
+
+beta_model_results <- seqwrap(beta_model, 
+                           cores = parallel::detectCores())
+
+# Collecting summaries
+m_model_summary <- seqwrap_summarise(m_model_results)
+
+beta_model_summary <- seqwrap_summarise(beta_model_results)
 
 
+```
 
+Note that the when the family argument is empty in glmmTMB, the Gaussian (normal) distribution is assumed.
 
+To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 250 iterations, systematic time-effects were removed by permuting the time variable within participants. This retained the within-participant correlation between samples while, on average, setting the differences between time-point to 0. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). After each iteration, p-values where adjusted using the false discovery rate (FDR) procedure implemented in `p.adjust(..., method = "fdr")` per parameter and model. The type 1 error rate was framed as the empirical rejection rate after FDR adjustment and evaluated among null effects as the percentage of sites with adjusted p-values < 0.05. Power was estimated among sites with added effects as the percentage of sites with adjusted p-values < 0.05. Agreement between models where assessed using the mean parameter value and the p-value.
 
-
-
-
-
+Following the permutation experiment with fitted the models using the full data sets of  &beta;, and M-values and identified the differentially methylated CpG sites as sites with adjusted p-values (FDR) < 0.05.]{custom-style="edits"}
 
 ## Results
 
