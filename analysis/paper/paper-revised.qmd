@@ -414,13 +414,15 @@ beta_model_summary <- seqwrap_summarise(beta_model_results)
 
 Note that the when the family argument is empty in glmmTMB, the Gaussian (normal) distribution is assumed.
 
-To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 250 iterations, systematic time-effects were removed by permuting the time variable within participants. This retained the within-participant correlation between samples while, on average, setting the differences between time-point to 0. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). After each iteration, p-values where adjusted using the false discovery rate (FDR) procedure implemented in `p.adjust(..., method = "fdr")` per parameter and model. The type 1 error rate was framed as the empirical rejection rate after FDR adjustment and evaluated among null effects as the percentage of sites with adjusted p-values < 0.05. Power was estimated among sites with added effects as the percentage of sites with adjusted p-values < 0.05. Agreement between models where assessed using the mean parameter value and the p-value.
+To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 250 iterations, systematic time-effects were removed by resampling the time variable within participants creating plasmode [@gadbury2008] data sets with a permuted time variable. This retained the within-participant correlation between samples while removing the association between time and methylation status. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). Our approach deviates from the workflow for the creation plasmode data sets suggested by @gadbury2008 but enables systematic evaluation of model characteristics at tracable magnitudes and direction of effects between data sets (M and &beta; values, respectively). After each iteration, type I error rates where estimated as the proportion of p-values < 0.05 among true null sites. The false discovery proportion was evaluated after adjustment of p-values using the false discovery rate (FDR) procedure implemented in `p.adjust(..., method = "fdr")` per parameter and model. Power was estimated among sites with added effects at the empirical critical  the percentage of sites with adjusted p-values < 0.05. Finally, agreement between models were assessed using the mean parameter value and the p-value.
 
-Following the permutation experiment with fitted the models using the full data sets of  &beta;, and M-values and identified the differentially methylated CpG sites as sites with adjusted p-values (FDR) < 0.05.]{custom-style="edits"}
+<!-- FIX THE ABOVE -->
+
+Following the permutation experiment, we fitted the models using the full data sets of  &beta;, and M-values and identified the differentially methylated CpG sites as sites with adjusted p-values (FDR procedure) < 0.05.]{custom-style="edits"}
 
 ## Results
 
-### Simulation study
+### RNA-seq simulation study
 
 ```{r}
 #| echo: false
@@ -621,7 +623,7 @@ sig_gene_baseline <- paste0(sig_gene_baseline[1,1][[1]],", fold-change: ",
 
 ```
 
-### Real-world data analysis
+### RNA-seq real-world data analysis
 
 Similarly to the simulation study results, modelling the real-world data also led to a larger number of models that did not reach convergence or the criteria of non-singular fits in the Gaussian model of transformed counts (`r m3_nonest`%). Among the count-based models, the non-informed negative binomial model had `r m1_nonest`% gene targets without valid estimates. Regularized models returned estimates for practically all gene targets (@fig-figure3 A).
 
@@ -652,6 +654,140 @@ if (show_figures) {
 
 
 ```
+
+
+### DNA methylation 
+
+```{r}
+#| label: get-permute-data
+#| echo: false
+
+
+# Extracting results from the permutation experiment
+# list files in permutation results folder
+out_dir <- here::here("analysis/data/derived_data/permutation")
+perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
+
+if (length(perm_files) == 0) source(
+      here::here("analysis/R/methylation-error-permutation.R")
+      )
+
+
+# Setting the spike time point
+spike_time <- "3_loading"
+
+perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
+perm       <- lapply(perm_files, readRDS)
+
+perm_summaries <- dplyr::bind_rows(lapply(perm, `[[`, "summaries"))
+perm_designs   <- dplyr::bind_rows(lapply(perm, `[[`, "design"))
+perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
+
+
+# alt_terms also accepts and omnibus test (not used here)
+alt_terms <- c(paste0("time_permute", spike_time), "time_omnibus")
+
+# Attach the per-iteration effects (delta, sign, stratum) to every test.
+# is_alt is ground truth for a (site, term) pair, not for a site.
+perm_dat <- perm_summaries |>
+      dplyr::inner_join(perm_designs,
+                        by = c("iter", "target" = "id")) |>
+      # delta is signed, so the test must be != 0 -- `delta > 0` would classify
+      # every downward-spiked site as a null and contaminate the reference.
+      dplyr::mutate(is_alt = delta != 0 & term %in% alt_terms)
+
+stopifnot(any(perm_dat$is_alt))
+
+
+# Calculate the overall type 1 error rate
+
+null_dat <- perm_dat |> 
+      # Keep null effects in non affected sites
+      filter(!(delta != 0 & term == "time_permute3_loading")) 
+
+      # Alternative, keep only all nulls
+      filter(delta == 0) 
+
+# This is the summary across all iterations and terms
+# this will give the error rate in each iteration/term/betacat/model
+s1 <- null_dat |>
+    dplyr::summarise(.by = c(model, betacat, iter, term),
+                     n = dplyr::n(), 
+                     sig = sum(p.value < 0.05, na.rm = TRUE),       
+                     error = sig / n)
+
+# Collapse strata and terms *within* an iteration: the permutation is the     
+# resampling unit, so one error rate per iteration per model.
+s1_iter <- s1 |>
+      dplyr::summarise(.by = c(model, iter), error = mean(error))
+
+model_error_type1 <- s1_iter |>
+      dplyr::summarise(.by = c(model),
+                       m.error = mean(error),
+                       s.error = stats::sd(error),
+                       n_iter  = dplyr::n(),
+                       mcse    = s.error / sqrt(n_iter)) |>
+      dplyr::mutate(lo = m.error - 1.96 * mcse,
+                    hi = m.error + 1.96 * mcse)
+
+
+beta_error <- paste0(round(model_error_type1[1,2] * 100, 2), 
+                    "% [", 
+                    round(model_error_type1[1,6] * 100, 2), 
+                    ", ", 
+                    round(model_error_type1[1,7] * 100, 2), 
+                    "]")
+m_error <- paste0(round(model_error_type1[2,2] * 100, 2), 
+                    "% [", 
+                    round(model_error_type1[2,6] * 100, 2), 
+                    ", ", 
+                    round(model_error_type1[2,7] * 100, 2), 
+                    "]")
+
+
+# Paired: both models see the same relabelling in each iteration.
+model_error_diff <- s1_iter |>
+            tidyr::pivot_wider(id_cols = iter, 
+                               names_from = model, 
+                               values_from = error) |>
+      
+      dplyr::summarise(
+            d = mean(beta - m),
+            d_mcse = stats::sd(beta - m) /sqrt(dplyr::n())) |>      
+      dplyr::mutate(lo = d - 1.96 * d_mcse, 
+                    hi = d + 1.96 * d_mcse)
+
+error_diff <- paste0(round(model_error_diff[1,1] * 100, 2), 
+                    "% [", 
+                    round(model_error_diff[1,3] * 100, 2), 
+                    ", ", 
+                    round(model_error_diff[1,4] * 100, 2), 
+                    "]")
+
+
+```
+
+
+
+
+Using the permutation experiment we first estimated the calibration of the two candidate models for the analysis of DNA methylation data in a small repeated-measures data set (n = 8, 38 samples; [@seaborne2018]). Both models had inflated type I error rates across all &beta;-value strata (@fig-figure5). Averaged over &beta; categories and model terms the Gaussian models on M values had slightly lower type I error compared to the beta regression model (`r m_error`, vs. `r beta_error`; mean difference: `r error_diff`).
+
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "(A) Distribution of &beta; values in the DNA methylation data set and categories used for creating the plasmode data set. Methylation sites were sampled with equal probability from each catogory. (B) Error rates across &beta; categories for the two candidate models (Gaussian on M-values and beta regression using &btea; values) averaged over model terms. Error bars represents 95% confidence intervals created from between iteration standard errors."
+#| fig-width: 6.69
+#| fig-height: 7.87
+#| out-width: "170mm"
+#| out-height: "200mm"
+#| label: fig-figure5
+```
+
+
 
 ## Discussion
 
