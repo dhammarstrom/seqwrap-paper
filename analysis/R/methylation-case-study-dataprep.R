@@ -202,21 +202,123 @@ metadata <- pheno_raw |>
 stopifnot(!anyNA(metadata$time), !anyNA(metadata$participant))
 
 
-rgset <- minfi::read.metharray(metadata$Basename, extended = TRUE, force = TRUE)
+rgset_file <- file.path(der_dir, "seaborne-rgset.RDS")
+meta_file <- file.path(der_dir, "seaborne-metadata.RDS")
+gset_file <- file.path(der_dir, "seaborne-gset-normalized.RDS")
 
-# Check that orders correspond
-stopifnot(identical(colnames(rgset), basename(metadata$Basename)))
+## Read the arrays #########################################################
+#
+# Guarded: read.metharray() parses all 80 IDAT files and the resulting rgset
+# is ~386 MB on disk, so re-reading and rewriting it on every source() is
+# minutes of work and a large write for an identical object. The downloads
+# above are guarded the same way.
 
-colnames(rgset) <- metadata$geo_accession
+if (!file.exists(rgset_file)) {
+  rgset <- minfi::read.metharray(
+    metadata$Basename,
+    extended = TRUE,
+    force = TRUE
+  )
+
+  # Check that orders correspond
+  stopifnot(identical(colnames(rgset), basename(metadata$Basename)))
+
+  colnames(rgset) <- metadata$geo_accession
+
+  saveRDS(rgset, rgset_file)
+}
+
+
+## Quality control, normalization and probe filtering #######################
+#
+# This was previously carried out in analysis/R/methylation-case-full.R. It
+# lives here instead because the normalized gset is an input to BOTH the full
+# model run and the permutation study (analysis/R/methylation-error-
+# permutation.R), and the permutation study has no reason to depend on a
+# script whose main job is fitting models over every site.
+
+if (!file.exists(gset_file)) {
+  if (!exists("rgset")) rgset <- readRDS(rgset_file)
+
+  # Determine detection p-values ###
+  # See ?minfi::detectionP for details.
+  det_p <- minfi::detectionP(rgset)
+
+  # Quality control (detection limits)
+  qc <- tibble::tibble(
+    geo_accession = colnames(det_p),
+    mean_det_p = colMeans(det_p),
+    frac_failed = colMeans(det_p > 0.01)
+  )
+
+  # Below is the suggested workflow for confirming sex. We expect only males
+  # and the function indicate that only one sex is present which should
+  # suffice as confirmation.
+  # predicted   <- minfi::getSex(minfi::mapToGenome(msetraw))
+  # qc$pred_sex <- predicted$predictedSex
+
+  # All samples pass quality control
+  keep_samples <- qc$geo_accession[qc$mean_det_p < 0.01]
+
+  rgset <- rgset[, keep_samples]
+  det_p <- det_p[, keep_samples]
+
+  # Drop any sample the QC removed from the metadata as well. In this data set
+  # every sample passes, so this is a no-op -- but when it is not, the gset and
+  # the metadata must not disagree about which samples exist. The previous
+  # version of this code (in methylation-case-full.R) computed the filtered
+  # metadata and then discarded it, leaving the saved metadata describing
+  # samples the gset no longer contained.
+  metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
+
+  # Functional normalization
+  gset <- minfi::preprocessFunnorm(rgset, ratioConvert = FALSE)
+
+  # Initial number of probes
+  nprobes_init <- dim(gset)[1]
+
+  ## (i) detection
+  det_p <- det_p[match(minfi::featureNames(gset), rownames(det_p)), ]
+  keep <- rowSums(det_p < 0.01) == ncol(gset)
+  gset <- gset[keep, ]
+
+  # Number of probes after filtering
+  nprobes_detectionfilter <- dim(gset)[1]
+
+  ## (ii) SNP-affected probes
+  gset <- minfi::dropLociWithSnps(gset, snps = c("SBE", "CpG"), maf = 0)
+
+  nprobes_snp <- dim(gset)[1]
+
+  ## (iii) cross-reactive probes
+  gset <- maxprobes::dropXreactiveLoci(gset)
+
+  nprobes_cross <- dim(gset)[1]
+
+  ## (iv) sex chromosomes
+  anno <- minfi::getAnnotation(gset)
+  gset <- gset[!anno$chr %in% c("chrX", "chrY"), ]
+
+  nprobes_final <- dim(gset)[1]
+
+  # Print number of probes
+  cat(paste0(
+    "The total number of probes in the data set after filtering: ",
+    nprobes_final,
+    "
+"
+  ))
+
+  ## Clean up memory
+  rm(rgset)
+  gc()
+
+  saveRDS(gset, gset_file)
+}
+
 
 ## Saving data for downstream use ##########################################
+#
+# Written last so that it reflects any QC filtering applied above.
 
-saveRDS(
-  rgset,
-  here::here("analysis/data/derived_data/seaborne-rgset.RDS")
-)
-
-saveRDS(
-  metadata,
-  here::here("analysis/data/derived_data/seaborne-metadata.RDS")
-)
+saveRDS(metadata, meta_file)

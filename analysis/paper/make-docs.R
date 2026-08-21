@@ -40,22 +40,62 @@ library(DHARMa)
 source(here::here("analysis/R/model-functions.R"))
 source(here::here("analysis/R/simulation-functions.R"))
 
-# Re-run simulations?
+# ---------------------------------------------------------------------------
+# Switches for a full re-run
+#
+# overwrite_models  refit the five real-data (Pillon) models. > 2 hours.
+# make_sim          re-run both simulation scenarios. > 24 hours.
+# make_meth_perm    re-run the methylation permutation study. Hours.
+#
+# overwrite_models MUST be TRUE when re-running against seqwrap >= 0.8.0 with
+# cached results produced by an earlier version. The seqwrapResults class
+# gained the properties `models`, `targets`, `cache` and `elapsed_time`, and
+# S7 validates a deserialised object against the class definition stored
+# inside it, so seqwrap_summarise() on an older m1_results.RDS fails with
+# "Can't find property <seqwrap::seqwrap_results>@cache". Refitting rewrites
+# them in the current format.
+# ---------------------------------------------------------------------------
+
+overwrite_models <- FALSE
 make_sim <- FALSE
+make_meth_perm <- FALSE
 
 # Detect cores
 cores <- parallel::detectCores()
 
-# Re-run simulations
+
+# Fit models on the real-world (Pillon) data ---------------------------------
+#
+# These run FIRST because the simulation depends on them: the mean-dispersion
+# trend models that parameterise simcounts2() are loess fits to model 1's
+# dispersion estimates, built in analysis/figures/figure-2.R. Sourcing that
+# script before run_model1() has put `m1_results` in the global environment
+# fails -- its own fallback is guarded on exists("run_model1"), which is
+# always TRUE here because model-functions.R is sourced above, so the fallback
+# never fires and figure-2.R aborts on a missing `m1_results`.
+
+m1_results <- run_model1(CORES = cores, overwrite = overwrite_models)
+m2_results <- run_model2(CORES = cores, overwrite = overwrite_models)
+m3_results <- run_model3(CORES = cores, overwrite = overwrite_models)
+m4_results <- run_model4(CORES = cores, overwrite = overwrite_models)
+m5_results <- run_model5(CORES = cores, overwrite = overwrite_models)
+
+
+# Simulations ----------------------------------------------------------------
+#
+# figure-2.R constructs `trend_model_observed` (inverse-variance weighted, the
+# high-variability scenario) and `trend_model_observed_low` (unweighted, the
+# low-variability scenario) from m1_results. sim_wrap1 uses the first,
+# sim_wrap2 the second.
+#
+# `overwrite` is passed through deliberately. Both wrappers skip a dataset
+# whose results are already on disk, so a re-run over a populated
+# analysis/data/raw_data would otherwise do nothing.
+
 if (make_sim) {
-  # NOTE: sim_wrap1/sim_wrap2 reference `trend_model_observed` and
-  # `trend_model_observed_noweights` which are constructed in
-  # analysis/figures/figure-2.R. That script must be sourced first
-  # (or the trend models otherwise made available) before calling the
-  # wrappers.
   source(here::here("analysis/figures/figure-2.R"))
-  sim_wrap1(cores = cores)
-  sim_wrap2(cores = cores)
+  sim_wrap1(cores = cores, overwrite = TRUE)
+  sim_wrap2(cores = cores, overwrite = TRUE)
 } else {
   download_dataverse()
 }
@@ -71,18 +111,53 @@ if (!dir.exists(here::here("analysis/data/raw_data"))) {
 }
 
 
-# Fit models on the real-world (Pillon) data
-# This makes the model results available in the environment (and saves to
-# disk).
 
-# Set this to TRUE if refit models
-overwrite_models <- FALSE
+# Methylation permutation study ----------------------------------------------
+#
+# analysis/R/methylation-error-permutation.R estimates type I error rates for
+# the beta and M-value models from within-participant permuted ("plasmode")
+# data: 500 permutations x 1000 sites x 4 model arms, written one file per
+# permutation into analysis/data/derived_data/permutation_v2/.
+#
+# The script skips a permutation whose file already exists, so an interrupted
+# job resumes simply by running it again. Note that permutation_v2/ is a NEW
+# directory: permutation/ holds the earlier two-arm run, kept because its
+# evaluation columns use the old names and the two cannot be pooled.
+#
+# case-study-methylation.qmd sources this script itself when the directory is
+# empty. Running it here instead makes a job of several hours a deliberate
+# step rather than a side effect of rendering a document.
+#
+# Inputs are produced by analysis/R/methylation-case-study-dataprep.R, which
+# downloads the raw arrays from GEO and writes the rgset, the sample metadata
+# and the normalized, probe-filtered gset.
 
-m1_results <- run_model1(CORES = cores, overwrite = overwrite_models)
-m2_results <- run_model2(CORES = cores, overwrite = overwrite_models)
-m3_results <- run_model3(CORES = cores, overwrite = overwrite_models)
-m4_results <- run_model4(CORES = cores, overwrite = overwrite_models)
-m5_results <- run_model5(CORES = cores, overwrite = overwrite_models)
+if (make_meth_perm) {
+  der <- here::here("analysis/data/derived_data")
+  meth_inputs <- file.path(
+    der,
+    c("seaborne-gset-normalized.RDS", "seaborne-metadata.RDS")
+  )
+
+  # Data preparation. Every DOWNLOAD in that script is guarded by
+  # file.exists(): the SOFT series metadata (pheno_raw.rds), the ~757 MB
+  # GSE114763_RAW.tar, and the untar/gunzip of the IDATs. So is the rgset
+  # build and the normalization. Re-running never re-downloads and never
+  # redoes work that is already on disk; the source() below is skipped
+  # entirely once both outputs exist.
+  if (!all(file.exists(meth_inputs))) {
+    source(here::here("analysis/R/methylation-case-study-dataprep.R"))
+  }
+
+  if (!all(file.exists(meth_inputs))) {
+    stop(
+      "Data preparation did not produce: ",
+      paste(basename(meth_inputs[!file.exists(meth_inputs)]), collapse = ", ")
+    )
+  }
+
+  source(here::here("analysis/R/methylation-error-permutation.R"))
+}
 
 
 # Source figure files (these are needed for the manuscript and supplement)

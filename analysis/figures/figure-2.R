@@ -10,9 +10,12 @@ source(here::here("analysis/figures/figure-opts.R"))
 
 
 cores <- parallel::detectCores()
-# run_model1 is sourced from analysis/R/model-functions.R by make-docs.R.
-# When sourcing this script directly, source the model functions first.
-if (!exists("run_model1")) {
+# make-docs.R fits the models before sourcing this script, so `m1_results`
+# is normally already present. The fallback below is for sourcing this
+# script directly. Guard on `m1_results`, not on `run_model1`: the latter
+# is always defined once model-functions.R has been sourced, so the
+# fallback never fired and the script aborted on a missing `m1_results`.
+if (!exists("m1_results")) {
   source(here::here("analysis/R/model-functions.R"))
   m1_results <- run_model1(CORES = cores)
 }

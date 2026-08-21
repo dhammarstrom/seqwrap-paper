@@ -22,94 +22,28 @@ cores <- parallel::detectCores()
 
 
 # Quality control and normalization of data ##################################
-
-# This checks if gset is available and skips normalization
-if (
-  !file.exists(here::here(
-    "analysis/data/derived_data/seaborne-gset-normalized.RDS"
-  ))
-) {
-  # Load metadata and red-green data set.
-  rgset <- readRDS("analysis/data/derived_data/seaborne-rgset.RDS")
-  metadata <- readRDS("analysis/data/derived_data/seaborne-metadata.RDS")
-
-  # Determine detection p-values ###
-  # See ?minfi::detectionP for details.
-  det_p <- minfi::detectionP(rgset)
-
-  # Quality control (detection limits)
-  qc <- tibble::tibble(
-    geo_accession = colnames(det_p),
-    mean_det_p = colMeans(det_p),
-    frac_failed = colMeans(det_p > 0.01)
-  )
-
-  # Below is the suggested workflow for confirming sex. We expect only males and
-  # the function indficate that only one sex is present which should suffice as
-  # confirmation.
-  # predicted   <- minfi::getSex(minfi::mapToGenome(msetraw))
-  # qc$pred_sex <- predicted$predictedSex
-
-  # All samples pass quality control
-  keep_samples <- qc$geo_accession[qc$mean_det_p < 0.01]
-  # length(keep_samples)
-
-  rgset <- rgset[, keep_samples]
-  det_p <- det_p[, keep_samples]
-  metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
-
-  # Functional normalization
-  gset <- minfi::preprocessFunnorm(rgset, ratioConvert = FALSE)
-
-  # Initial number of probes
-  nprobes_init <- dim(gset)[1]
-
-  ## (i) detection
-  det_p <- det_p[match(minfi::featureNames(gset), rownames(det_p)), ]
-  keep <- rowSums(det_p < 0.01) == ncol(gset)
-  gset <- gset[keep, ]
-
-  # Number of probes after filtering
-  nprobes_detectionfilter <- dim(gset)[1]
-
-  ## (ii) SNP-affected probes
-  gset <- minfi::dropLociWithSnps(gset, snps = c("SBE", "CpG"), maf = 0)
-
-  nprobes_snp <- dim(gset)[1]
-
-  ## (iii) cross-reactive probes
-  gset <- maxprobes::dropXreactiveLoci(gset)
-
-  nprobes_cross <- dim(gset)[1]
-
-  ## (iv) sex chromosomes
-  anno <- minfi::getAnnotation(gset)
-  gset <- gset[!anno$chr %in% c("chrX", "chrY"), ]
-
-  nprobes_final <- dim(gset)[1]
-
-  # Print number of probes
-  cat(paste0(
-    "The total number of probes in the data set after filtering: ",
-    nprobes_final
-  ))
-
-  ## Clean up memory
-  rm(rgset)
-  gc()
-
-  # Save filtered gset ########################################################
-  saveRDS(
-    gset,
-    here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
-  )
-}
+#
+# Moved to analysis/R/methylation-case-study-dataprep.R. The normalized gset is
+# an input to both this script and the permutation study
+# (analysis/R/methylation-error-permutation.R), so it is built once, upstream,
+# rather than as a side effect of the script that fits the full models.
 
 # Load normalized saved gset ################################################
 
-gset <- readRDS(
-  here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
+gset_file <- here::here(
+  "analysis/data/derived_data/seaborne-gset-normalized.RDS"
 )
+
+if (!file.exists(gset_file)) {
+  stop(
+    "seaborne-gset-normalized.RDS is missing. Run ",
+    "analysis/R/methylation-case-study-dataprep.R first -- it downloads the ",
+    "arrays if needed and writes the normalized, filtered gset.",
+    call. = FALSE
+  )
+}
+
+gset <- readRDS(gset_file)
 metadata <- readRDS(
   here::here("analysis/data/derived_data/seaborne-metadata.RDS")
 )
@@ -265,7 +199,7 @@ if (
 
 if (
   !file.exists(
-    here::here("analysis/data/derived_data/m-model-full-sum.RDS.RDS")
+    here::here("analysis/data/derived_data/m-model-full-sum.RDS")
   )
 ) {
   mm1_sum <- seqwrap_summarise(

@@ -469,7 +469,7 @@ m1_m2_sim <- function(
   dataset,
   dofit = TRUE,
   weighted_loess = TRUE,
-  CORES = 2
+  CORES = parallel::detectCores()
 ) {
   evaluations <- list()
   summaries <- list()
@@ -716,7 +716,8 @@ m1_m2_sim <- function(
 #'
 #' This is the model for transformed counts data the function performs
 #' transformation and fits models over a combined_data object.
-m3_sim <- function(combined_data, dataset, dofit = TRUE, CORES = 2) {
+m3_sim <- function(combined_data, dataset, dofit = TRUE,
+                   CORES = parallel::detectCores()) {
   evaluations <- list()
   summaries <- list()
 
@@ -800,7 +801,8 @@ m3_sim <- function(combined_data, dataset, dofit = TRUE, CORES = 2) {
 #'
 #' This function does the Poisson models with observation level random effects
 #' both in a naive and informed version.
-m4_m5_sim <- function(combined_data, dataset, dofit = TRUE, CORES = 2) {
+m4_m5_sim <- function(combined_data, dataset, dofit = TRUE,
+                      CORES = parallel::detectCores()) {
   evaluations <- list()
   summaries <- list()
   evaluations2 <- list()
@@ -1078,6 +1080,112 @@ extract_rawcounts <- function(
 }
 
 
+#' Cheap PSOCK worker start-up for a block of seqwrap() calls
+#'
+#' `seqwrap()` creates a PSOCK cluster and destroys it again on every call, and
+#' each worker runs the project `.Rprofile` -- so renv activates once per
+#' worker, per call. Measured on a 12-core machine that is roughly 19 s of
+#' fixed cost per `seqwrap()` call. `sim_wrap1()` and `sim_wrap2()` each make
+#' 15 calls per dataset (3 sample sizes x 5 models) across 10 datasets, i.e.
+#' 150 calls, so a large part of each wrapper is spent starting workers rather
+#' than fitting models.
+#'
+#' Pointing `R_PROFILE_USER` at an empty file makes the workers skip
+#' `.Rprofile`, and pushing `.libPaths()` through `R_LIBS` keeps them on the
+#' same renv library so package versions are unchanged. This takes the fixed
+#' cost to about 4 s per call.
+#'
+#' Because the workers no longer run `.Rprofile`, renv does not hide the base R
+#' library from them: they get the renv library and sandbox first (identical to
+#' this session) with the system library appended as a fallback. A package that
+#' is MISSING from the renv library would therefore be taken silently from the
+#' system library on a worker. `fast_workers_begin()` asserts that the packages
+#' doing the work resolve to the same installation in parent and worker.
+#'
+#' `normalizePath()` matters here: for a package that is *attached* in this
+#' session `find.package()` reports the path it was loaded from, and renv's
+#' library entries are junctions into the renv cache -- so the parent would say
+#' ".../renv/cache/.../seqwrap" where a worker, resolving through
+#' `.libPaths()`, says ".../renv/library/.../seqwrap". Same installation, two
+#' spellings. Comparing the resolved directory removes that false alarm while
+#' still catching a genuine fallback to the system library.
+#'
+#' Pair every call with `fast_workers_end()`, ideally through `on.exit()` so
+#' that the session is restored even if the caller aborts.
+#'
+#' @param pkgs Packages that must resolve identically on the workers. These are
+#'   the ones referenced by the model functions and by the summary and
+#'   evaluation functions used in the simulations.
+#' @param quiet Suppress the pbapply progress bar, which `seqwrap()` prints on
+#'   every call and which is noise inside a loop.
+#' @return A state object to hand back to `fast_workers_end()`.
+fast_workers_begin <- function(
+  pkgs = c("seqwrap", "glmmTMB", "broom.mixed", "lmerTest", "lme4"),
+  quiet = TRUE
+) {
+  state <- list(
+    env = Sys.getenv(c("R_PROFILE_USER", "R_LIBS"), unset = NA),
+    profile = tempfile(fileext = ".R"),
+    pbo = NULL
+  )
+  file.create(state$profile)
+
+  Sys.setenv(
+    R_PROFILE_USER = state$profile,
+    R_LIBS = paste(.libPaths(), collapse = .Platform$path.sep)
+  )
+  if (quiet) state$pbo <- pbapply::pboptions(type = "none")
+
+  stamp <- function(pk) {
+    vapply(
+      pk,
+      function(p) {
+        paste(
+          normalizePath(find.package(p), winslash = "/", mustWork = FALSE),
+          utils::packageVersion(p)
+        )
+      },
+      character(1)
+    )
+  }
+
+  parent <- stamp(pkgs)
+  cl <- parallel::makeCluster(2)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+  worker <- parallel::clusterCall(cl, stamp, pkgs)
+
+  if (!all(vapply(worker, identical, logical(1), parent))) {
+    fast_workers_end(state)
+    stop(
+      "Worker package resolution differs from the parent session. ",
+      "A package is probably missing from the renv library and would be ",
+      "taken from the system library on the workers.",
+      call. = FALSE
+    )
+  }
+
+  state
+}
+
+
+#' Restore the session after `fast_workers_begin()`
+#'
+#' @param state The value returned by `fast_workers_begin()`.
+fast_workers_end <- function(state) {
+  if (!is.null(state$pbo)) pbapply::pboptions(state$pbo)
+
+  for (v in names(state$env)) {
+    if (is.na(state$env[[v]])) {
+      Sys.unsetenv(v)
+    } else {
+      do.call(Sys.setenv, stats::setNames(list(state$env[[v]]), v))
+    }
+  }
+  unlink(state$profile)
+  invisible(NULL)
+}
+
+
 #' Simulation wrapper 1
 #'
 #' A wrapper for the simulation functions for scenario 1
@@ -1087,6 +1195,11 @@ extract_rawcounts <- function(
 #' @param overwrite Should available results be overwritten?
 sim_wrap1 <- function(cores, seed = 1, overwrite = FALSE) {
   set.seed(1)
+
+  # 150 seqwrap() calls follow (10 datasets x 3 sample sizes x 5 models);
+  # see fast_workers_begin() for why worker start-up dominates without this.
+  .fw <- fast_workers_begin()
+  on.exit(fast_workers_end(.fw), add = TRUE)
 
   raw_dir <- here::here("analysis/data/raw_data/simdata/raw")
   clean_dir <- here::here("analysis/data/raw_data/simdata/clean")
@@ -1110,7 +1223,18 @@ sim_wrap1 <- function(cores, seed = 1, overwrite = FALSE) {
     if (!dir.exists(est_dir)) dir.create(est_dir, recursive = TRUE)
     if (!dir.exists(eval_dir)) dir.create(eval_dir, recursive = TRUE)
 
-    if (!length(list.files(est_dir)) > 0 | overwrite) {
+    # Resume per DATASET, not per directory. The previous guard asked whether
+    # est_dir contained any files at all, which meant that once dataset 1 had
+    # written its estimates the remaining nine were skipped -- a run from an
+    # empty directory produced one dataset, not ten. Only overwrite = TRUE
+    # forced the loop to complete, so the argument was doing the work the
+    # guard was supposed to do. m5_evaluations is the last file written for a
+    # dataset, so its presence means this dataset finished.
+    done <- file.exists(
+      file.path(eval_dir, paste0("m5_evaluations_", i, ".RDS"))
+    )
+
+    if (!done | overwrite) {
       # Save simulated data for later
       saveRDS(
         d$simdat,
@@ -1217,6 +1341,9 @@ sim_wrap1 <- function(cores, seed = 1, overwrite = FALSE) {
 sim_wrap2 <- function(cores, seed = 1, overwrite = FALSE) {
   set.seed(seed)
 
+  .fw <- fast_workers_begin()
+  on.exit(fast_workers_end(.fw), add = TRUE)
+
   raw_dir <- here::here("analysis/data/raw_data/simdata2/raw")
   clean_dir <- here::here("analysis/data/raw_data/simdata2/clean")
   popeff_dir <- here::here("analysis/data/raw_data/simdata2/popeffect")
@@ -1228,7 +1355,7 @@ sim_wrap2 <- function(cores, seed = 1, overwrite = FALSE) {
       nullgenes = 7500,
       condB_true = 1250,
       condB_time2_true = 1250,
-      dispersion_model = trend_model_observed_noweights,
+      dispersion_model = trend_model_observed_low,
       dataset = i
     )
 
@@ -1239,7 +1366,18 @@ sim_wrap2 <- function(cores, seed = 1, overwrite = FALSE) {
     if (!dir.exists(est_dir)) dir.create(est_dir, recursive = TRUE)
     if (!dir.exists(eval_dir)) dir.create(eval_dir, recursive = TRUE)
 
-    if (!length(list.files(est_dir)) > 0 | overwrite) {
+    # Resume per DATASET, not per directory. The previous guard asked whether
+    # est_dir contained any files at all, which meant that once dataset 1 had
+    # written its estimates the remaining nine were skipped -- a run from an
+    # empty directory produced one dataset, not ten. Only overwrite = TRUE
+    # forced the loop to complete, so the argument was doing the work the
+    # guard was supposed to do. m5_evaluations is the last file written for a
+    # dataset, so its presence means this dataset finished.
+    done <- file.exists(
+      file.path(eval_dir, paste0("m5_evaluations_", i, ".RDS"))
+    )
+
+    if (!done | overwrite) {
       # Save simulated data for later
       saveRDS(
         d$simdat,

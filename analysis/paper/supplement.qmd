@@ -312,7 +312,7 @@ We should expect some errors from modelling many thousands of targets. As seen i
 m1.2_results <- seqwrap(
   m1.1,
   eval_fun = dispersion_fun,
-  cores = 12, 
+  cores = parallel::detectCores(), 
   return_models = FALSE,
   verbose = FALSE
 )
@@ -493,7 +493,7 @@ Running the prototyping seems to work, we will proceed with the full data set.
 
 m1.3_results <- seqwrap(
   m1.3, 
-  cores = 12,
+  cores = parallel::detectCores(),
   return_models = FALSE, 
   verbose = FALSE
 )
@@ -692,7 +692,7 @@ seqwrap_val <- seqwrap_compose(
 
 seqwrap_model <- seqwrap(seqwrap_val,
                         return_models = FALSE,
-                        cores = 1, 
+                        cores = parallel::detectCores(), 
                         verbose = FALSE)
 
 
