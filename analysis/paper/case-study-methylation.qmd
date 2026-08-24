@@ -542,26 +542,29 @@ data.frame(Mval, beta) |>
 
 ### Inferential error rates across models 
 
-Next, we will compare the models using type I error rate, the false discovery proportion, power and discrimination determined from permutation of within-participant relabeled data. This relabeling establishes a null distribution for statistical tests performed using the *within-participant design*. The design keeps the within-participant correlation. Our approach is similar to what was described in [@gadbury2008].
+Next, we will compare the models using type I error rate, power and discrimination determined from permutation of within-participant relabeled data. This relabeling establishes a null distribution for statistical tests performed using the *within-participant design*. The design keeps the within-participant correlation. Our approach is similar to what was described in [@gadbury2008].
 
 We will perform the experiment on permuted data from a subset of genomic sites distributed across different strata of &beta; values. 
 
-The permutation loop below produces two results from a single set of model fits. A fixed number of sites is sampled from each &beta;-value stratum. Within every permutation, a subset of those sites receives a *known* effect (adding a known average effect) while the remainder are left untouched. Sites without an effect estimate the *type I error rate*, sites with an effect estimate *power*.
+A fixed number of sites is sampled from each &beta;-value stratum. Within every permutation, a random subset of those sites receives a *known* effect (adding a known average effect) while the remainder are left untouched. Sites without an effect estimate the *type I error rate*, sites with an effect estimate *power*.
 
-We will use the *M-value scale* to add the effect to permuted data with effect assignment *redrawn in every permutation*. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and proportionally to &delta;&times;log(2) for the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization. Our approach differs here from @gadbury2008. We fix the effect sizes while @gadbury2008 uses emperical effect sizes from the data. Our simplified approach enables comparisons between model fitting procedures at known effect sizes and signs across strata of &beta; values.
+We will use the *M-value scale* to add the effect to permuted data with effect assignment *redrawn in every permutation*. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and proportionally to &delta;&times;log(2) for the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization. Our approach differs here from @gadbury2008. We fix the effect sizes while @gadbury2008 uses empirical effect sizes from the data. Our simplified approach enables comparisons between model fitting procedures at known effect sizes and signs across strata of &beta; values.
 
-In the code chunk below, a single site is used to show the workflow. &beta; values are calculated from the `gset` object and transformed to M values. We are using the first row of the M value matrix and join the values with the meta data.  
+In the code chunk below, a single site is used to show the workflow. &beta; values are calculated from the `gset` object and transformed to M values. We are using the first row of the M value matrix and join the values with the meta data. Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.3) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both model types are fitted.
 
-Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.8) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both models are fitted.
-
-We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set.   
+We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set. In small samples, linear mixed model parameter p-values from the Wald test are anti-conservative [@luke2017]. When the restricted maximum likelihood (REML) is used in place of maximum likelihood and small sample size-corrections are used (Kenward-Roger ) estimate of the standard errors can be biased leading to inflated type 1 error rates when parameter estimates  are used for inference.   
 
 
 ```{r}
 
+# Prepare data 
 beta_vals <- getBeta(gset, offset = 100)
 m_vals <- log2(beta_vals / (1 - beta_vals))
 
+
+
+
+# Selecting a random site for testing
 y <- data.frame(y = m_vals[3474,]) |> 
       tibble::rownames_to_column(var = "geo_accession" ) 
 
@@ -569,34 +572,74 @@ set.seed(1)
 dat <- metadata |> 
       select(geo_accession, participant, time) |> 
       inner_join(y) |>
+      # Permutation of time within participant
       group_by(participant) |> 
       mutate(time_permute = sample(time, replace = FALSE)) |> 
       ungroup() |> 
       mutate(msim = if_else(time_permute == "3_loading", 
-             y, y), 
+             y + 0.3, y), 
              betasim = plogis(msim * log(2))) 
 
 
-m_mod <- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
+# A general purpose summary function for ML/REML fits
+temp_summary_fun <- function(m) {
+      
+      is_reml <- m$modelInfo$REML
+      # LRT p-value
+      if(!is_reml) {
+            lrt_mod <- drop1(m, test = "Chisq")
+            lrt_p <- lrt_mod["time_permute", "Pr(>Chi)"]
+            
+      } else { lrt_p <- NA }
+      # Wald p-value (restricted to paremeter 3_loading)
+      wald_p <- coef(summary(m))$cond["time_permute3_loading", "Pr(>|z|)"]
+      # Wald p-value Satterthwaite
+      wald_p_satter <- coef(summary(m, ddf = "satterthwaite"))$cond["time_permute3_loading", "Pr(>|t|)"]
+      
+      data.frame(lrt_p = lrt_p, 
+                 wald_p = wald_p, 
+                 wald_p_satter = wald_p_satter)
+      
+}
+
+
+# Fits 
+fits <- list()
+# Maximum likelihood M-values
+fits[[1]] <- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
                           data = dat)
 
-beta_mod0 <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
+
+# Maximum likelihood beta regression
+fits[[2]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
                           data = dat, 
-                
                           family = glmmTMB::beta_family)
 
-beta_mod1 <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
+# REML M-values
+fits[[3]]<- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
+                           REML = TRUE,
+                          data = dat)
+
+# REML beta regression
+fits[[4]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
                           data = dat, 
-                          dispformula = ~  time_permute,
+                          REML = TRUE,
                           family = glmmTMB::beta_family)
 
 
-summary(beta_mod1)
-summary(beta_mod0)
+
+lapply(fits,temp_summary_fun) |> 
+      bind_rows() |> 
+      mutate(model = c("M-values",
+                       "B-values",
+                       "M-values",
+                       "B-values"), 
+             estimator = c("ML", "ML", "REML", "REML"))
 
 
-es_mmod <- coef(summary(m_mod))$cond["time_permute3_loading","Estimate"]
-es_betamod<- coef(summary(beta_mod))$cond["time_permute3_loading","Estimate"]
+
+es_mmod <- coef(summary(m_mod1))$cond["time_permute3_loading","Estimate"]
+es_betamod<- coef(summary(beta_mod1))$cond["time_permute3_loading","Estimate"]
 
 
 es_betamod <- es_betamod / log(2)

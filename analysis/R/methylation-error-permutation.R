@@ -1,10 +1,12 @@
 # This script runs the permutation study on the methylation data set from
-# seaborne et al..
-# The resulting data is evaluated in case-study-methylation.qmd
+# seaborne et al. The resulting data is evaluated in case-study-methylation.qmd
+# and in the main paper source.
 
-# The script saves permutation results (one file per iteration)
-# in analysis/data/derived_data/permutation.
-# Analysis of the results are kept in the extended description of the case study.
+# The script saves permutation results (one file per iteration) in the
+# versioned results directory set by `out_dir` below
+# (analysis/data/derived_data/permutation_v3).
+# Analysis of the results are kept in the extended description
+# of the case study.
 
 # Load packages ###########################
 library(seqwrap)
@@ -67,7 +69,8 @@ stopifnot(
 )
 
 # The time-point that receives the simulated effect is the 3_loading
-# samping time-point. Evaluation requires thsi specific parameter from the model.
+# samping time-point. Evaluation requires thsi specific parameter
+# from the model.
 spike_time <- "3_loading"
 
 # Check beta- and M-values are two representations of the same data
@@ -79,6 +82,9 @@ stopifnot(
 # We want to "test" the models on a subset of sites that represents low, mid
 # and high beta values. row_id is assigned before any filtering so that it
 # indexes rows of beta_vals / m_vals directly.
+# The subset is fixed in permutations - The seed above determines
+# the sites selected here.
+
 subset <- data.frame(
   id = row.names(beta_vals),
   betacat = cut(
@@ -99,10 +105,11 @@ subset <- data.frame(
 m_sub <- m_vals[subset$row_id, , drop = FALSE]
 stopifnot(identical(rownames(m_sub), subset$id))
 
-# plogis() saturates to exactly 0/1 near |M| = 37, which the beta model cannot
-# accept, and the spike is what pushes extreme sites outwards. Check the worst
-# case:
-stopifnot(max(abs(m_vals)) + max(delta_grid) < 30)
+# plogis() saturates (in practice) to exactly 0/1 near |M| = 17, which
+# breaks the beta model. The added effect adds to extreme sites.
+# Here we check the worst case:
+stopifnot(max(abs(m_vals)) + max(delta_grid) < 17)
+
 
 # Permute time labels within participant. This keeps each participants mean
 # and the within-participant correlation, and removes the association between
@@ -121,6 +128,10 @@ permute_time <- function(md) {
 # `delta` is returned SIGNED, i.e. it is the effect actually added to the
 # M-values, so it can be used directly downstream. `delta_abs` keeps the
 # magnitude for summaries that pool the two directions.
+
+# sub, the subset data frame,
+# cells, cells in the effect size grid
+# n_per_cell, number of strata (5) per effect size grid cell.
 assign_spike <- function(sub, cells, n_per_cell) {
   # One code per spiked site: cell 1 repeated n_per_cell times, then cell 2,
   # and so on. Codes are 1..nrow(cells); 0 marks an unspiked site.
@@ -147,101 +158,113 @@ assign_spike <- function(sub, cells, n_per_cell) {
 # factor. The omnibus test has one row per model fit and it is therefore
 # placed in eval_fun rather than in summary_fun.
 #
-# The four model arms are not all glmmTMB fits, and the accessors are not
-# interchangeable. The eval_fun takes care of this, but returns different
-# statistics per algorithm.
+# All four arms are fitted with glmmTMB, so the diagnostics are directly
+# comparable across arms. The earlier lmerTest arm is gone: glmmTMB computes
+# Satterthwaite degrees of freedom itself (see summary_fun below), which also
+# makes the small-sample reference distribution available on the beta scale,
+# where lmerTest could not follow.
 #
-#   glmmTMB  -- S3 list. m$fit$convergence is 0 when the optimiser reports a
-#               satisfactory solution; m$sdr$pdHess is TRUE when the Hessian is
-#               positive definite (no singular fit, no unidentifiable
-#               parameters). drop1(test = "Chisq") gives a chi-square LRT with
-#               columns Df / AIC / LRT / Pr(>Chi).
-#   merMod   -- S4 (lmerTest::lmer returns lmerModLmerTest).
-
-# lme4::isSingular() is TRUE whenever a variance component sits on
-# the zero boundary while glmmTMB reports only a non-positive-definite
-# Hessian and flagged 0 of the
-# same 120. Summing them into one "failure rate" would make the lmerTest arm
-# look catastrophic when it is fitting fine. Report the two separately, and
-# treat only `convergence != 0` and `is.na(pval)` as failures.
+# m$fit$convergence is 0 when the optimiser reports a satisfactory solution;
+# m$sdr$pdHess is TRUE when the Hessian is positive definite (no singular fit,
+# no unidentifiable parameters). The two are reported separately, and only
+# `convergence != 0` and an unusable p-value count as failures.
+#
+# For the omnibus test, drop1(test = "Chisq") gives a chi-square LRT with
+# columns Df / AIC / LRT / Pr(>Chi).
 #
 # `re_sd`, the estimated participant standard deviation, is recorded for every
-# arm as the raw material for a comparable boundary diagnostic. Note that it is
-# not directly threshold-able across arms either: on that same pilot the REML
-# fits put 31 sites at exactly zero while the ML fits of the same data shrank
-# to small-but-nonzero values (order 1e-6) at all but 2. Choose the threshold
-# when analysing, and choose it per arm.
+# model for potential comparisons between models.
 #
-# Columns are therefore named for what they hold in general (`stat`, `test`)
-# rather than for the chi-square case, and `ddf` is NA for the LRT arms.
-# Columns are addressed BY NAME: positional indexing is what silently produced
-# NAs when the merMod table turned out to have a different shape and no
-# <none> row.
+# Columns are named for what they hold in general (`stat`, `test`) rather than
+# for the chi-square case. Columns are addressed BY NAME: positional indexing
+# is what silently produced NAs when a table turned out to have a different
+# shape and no <none> row.
 eval_fun <- function(m) {
-  if (inherits(m, "glmmTMB")) {
-    vc <- glmmTMB::VarCorr(m)$cond$participant
-
-    # A REML fit has NO valid likelihood-ratio test of a fixed effect: the
-    # restricted likelihoods of the full and reduced models are taken over
-    # different fixed-effect design matrices and are not comparable. drop1()
-    # does not refuse -- it returns a NEGATIVE statistic and p = 1 (measured:
-    # LRT = -10.53 for the beta arm, -7.51 for the Gaussian one). Those would
-    # enter the error rates as guaranteed non-rejections and silently drag the
-    # type I estimate towards zero, so the omnibus is left empty instead. The
-    # REML arms contribute Wald contrasts only.
-    reml <- isTRUE(m$modelInfo$REML)
-    a <- if (reml) NULL else drop1(m, test = "Chisq")
-
-    data.frame(
-      convergence = m$fit$convergence,
-      singular = !m$sdr$pdHess,
-      re_sd = sqrt(as.numeric(vc[1, 1])),
-      n = nrow(m$frame),
-      test = if (reml) "none" else "LRT",
-      df = if (reml) NA_real_ else a["time_permute", "Df"],
-      ddf = NA_real_,
-      stat = if (reml) NA_real_ else a["time_permute", "LRT"],
-      pval = if (reml) NA_real_ else a["time_permute", "Pr(>Chi)"]
-    )
-  } else if (inherits(m, "merMod")) {
-    a <- stats::anova(m, ddf = "Satterthwaite")
-    cv <- m@optinfo$conv$opt
-    vc <- lme4::VarCorr(m)$participant
-
-    data.frame(
-      # lme4 reports 0 for a satisfactory solution, as glmmTMB does.
-      convergence = if (length(cv)) cv else NA_integer_,
-      singular = lme4::isSingular(m),
-      re_sd = sqrt(as.numeric(vc[1, 1])),
-      n = nrow(m@frame),
-      test = "Satt-F",
-      df = a[["NumDF"]][1],
-      ddf = a[["DenDF"]][1],
-      stat = a[["F value"]][1],
-      pval = a[["Pr(>F)"]][1]
-    )
-  } else {
+  # Safety stop, the arms below are all glmmTMB fits
+  if (!inherits(m, "glmmTMB")) {
     stop("unsupported model class: ", paste(class(m), collapse = "/"))
   }
+
+  vc <- glmmTMB::VarCorr(m)$cond$participant
+
+  # A REML fit has no valid likelihood-ratio test of a fixed effect: the
+  # restricted likelihoods of two different fixed-effect designs are not
+  # comparable. The omnibus is left empty for the REML arms, which therefore
+  # contribute Wald contrasts only.
+
+  # Check if the fit is REML
+  reml <- isTRUE(m$modelInfo$REML)
+  # Save the drop1 output
+  a <- if (reml) NULL else drop1(m, test = "Chisq")
+
+  data.frame(
+    convergence = m$fit$convergence,
+    singular = !m$sdr$pdHess,
+    re_sd = sqrt(as.numeric(vc[1, 1])),
+    n = nrow(m$frame),
+    reml = reml,
+    test = if (reml) "none" else "LRT",
+    df = if (reml) NA_real_ else a["time_permute", "Df"],
+    stat = if (reml) NA_real_ else a["time_permute", "LRT"],
+    pval = if (reml) NA_real_ else a["time_permute", "Pr(>Chi)"]
+  )
 }
 
-# Wald summaries, one row per fixed effect.
+# Wald summaries, one row per fixed effect and two reference distributions per
+# row:
 #
-# component = "cond" is passed explicitly rather than relying on it being the
-# broom.mixed default for glmmTMB. Any arm carrying a dispersion or
-# zero-inflation model has coefficients named time_permute* in that component
-# too, and duplicated (model, term) pairs would silently corrupt the BH
-# adjustment below -- that separation should not rest on a package setting.
+#   p_wald  the asymptotic Wald test, estimate / std.error against a normal
+#   p_satt  the same statistic against a t distribution with Satterthwaite
+#           denominator degrees of freedom (`ddf`)
 #
-# `df` is kept: for the lmerTest arm it holds the Satterthwaite denominator
-# degrees of freedom, which is the whole point of that arm. glmmTMB fits have
-# no such column, so it is filled with NA to keep the arms bind_rows-able.
+# Both come from coef(summary(.))$cond, i.e. from the same fit, so the ONLY
+# thing that differs between the two columns is the reference distribution.
+# That is what makes the small-sample correction readable on its own,
+# separately from the ML/REML contrast carried by the arms.
+#
+# summary(ddf = "satterthwaite") is a glmmTMB >= 1.1.11 feature and works for
+# the beta family as well as the Gaussian one, which is what allows the
+# small-sample cell to be filled on both scales.
+#
+# The `cond` component is taken explicitly rather than relying on a default:
+# any arm carrying a dispersion or zero-inflation model has coefficients named
+# time_permute* in that component too, and duplicated (model, term) pairs
+# would silently corrupt the BH adjustment applied downstream.
+#
+# The Satterthwaite computation needs a second differentiation of the
+# likelihood and can fail on a degenerate fit where the plain Wald table is
+# still returned. It is wrapped so that such a site loses `p_satt` only,
+# rather than dropping out of every arm-by-test cell at once.
+#
+# `ddf` is stored per contrast, not just used, because it is also the
+# diagnostic for this arm: on a site whose participant variance sits on the
+# zero boundary the denominator df can collapse to well below the nominal
+# residual df, and a p_satt from such a fit is conservative for a reason that
+# has nothing to do with the small-sample correction working as intended.
 summary_fun_wald <- function(m) {
-  out <- broom.mixed::tidy(m, effects = "fixed", component = "cond")
+  cf <- coef(summary(m))$cond
 
-  if (!"df" %in% names(out)) out$df <- NA_real_
+  out <- data.frame(
+    term = rownames(cf),
+    estimate = cf[, "Estimate"],
+    std.error = cf[, "Std. Error"],
+    p_wald = cf[, "Pr(>|z|)"],
+    row.names = NULL,
+    stringsAsFactors = FALSE
+  )
 
-  dplyr::select(out, effect, term, estimate, std.error, df, p.value)
+  sat <- tryCatch(
+    coef(summary(m, ddf = "satterthwaite"))$cond,
+    error = function(e) NULL
+  )
+
+  # Matched by term name, never by position.
+  i <- if (is.null(sat)) NA_integer_ else match(out$term, rownames(sat))
+
+  out$ddf <- if (is.null(sat)) NA_real_ else sat[i, "ddf"]
+  out$p_satt <- if (is.null(sat)) NA_real_ else sat[i, "Pr(>|t|)"]
+
+  out
 }
 
 summary_fun <- summary_fun_wald
@@ -252,13 +275,17 @@ summary_fun <- summary_fun_wald
 n_perm <- 500 #
 
 # The results directory is VERSIONED, and the loop skips an iteration whose
-# file already exists. analysis/data/derived_data/permutation holds the earlier
-# run, which fitted two model arms only (beta, m) and stored the evaluation
-# columns under the old names (pdHess, lrt). Writing the four-arm results into
-# that directory would have skipped every iteration -- and had the files been
-# removed instead, the two runs could not be told apart. Bump the suffix
-# whenever the set of model arms or the eval_fun columns change.
-out_dir <- here::here("analysis/data/derived_data/permutation_v2")
+# file already exists. Writing a new set of arms into an existing directory
+# would skip every iteration -- and had the files been removed instead, the
+# runs could not be told apart. Bump the suffix whenever the set of model arms
+# or the eval_fun / summary_fun columns change. Earlier runs:
+#
+#   permutation      two arms (beta, m), old eval column names (pdHess, lrt)
+#   permutation_v2   four arms (beta, beta_reml, m, m_reml_satt), where the
+#                    Satterthwaite arm was an lmerTest fit on the M scale only
+#   permutation_v3   four glmmTMB arms (beta, beta_reml, m, m_reml) with both
+#                    Wald reference distributions stored per contrast
+out_dir <- here::here("analysis/data/derived_data/permutation_v3")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Worker start-up cost.
@@ -297,15 +324,13 @@ Sys.setenv(
 # library/.../seqwrap". Same installation, two spellings. Comparing the resolved
 # directory removes that false alarm while still catching a genuine fallback to
 # the system library.
-# lmerTest/lme4 fit the m_reml_satt arm, so they do work on the workers too.
-# Satterthwaite degrees of freedom are computed by lmerTest itself and need no
-# further package (Kenward-Roger would have pulled in pbkrtest).
+# All four arms are glmmTMB fits, and the Satterthwaite degrees of freedom are
+# computed by glmmTMB itself (>= 1.1.11), so no further package is needed on
+# the workers -- Kenward-Roger would have pulled in pbkrtest, and the earlier
+# lmerTest arm is gone.
 .pkgs <- c(
   "seqwrap",
-  "glmmTMB",
-  "broom.mixed",
-  "lmerTest",
-  "lme4"
+  "glmmTMB"
 )
 .stamp <- function(pk)
   vapply(
@@ -376,32 +401,34 @@ tryCatch(
 
       ## (5) Fit the model arms to the same permuted, spiked data ---------
       #
-      # The design crosses SCALE (beta vs M) with ESTIMATOR (ML vs REML) and
-      # REFERENCE DISTRIBUTION (asymptotic vs small-sample), giving seven
-      # inferential cells from four fits:
+      # The design crosses SCALE (beta vs M) with ESTIMATOR (ML vs REML), and
+      # each fit is then read with every REFERENCE DISTRIBUTION available to
+      # it. Four fits, all glmmTMB, and ten inferential cells:
       #
-      #   arm            fit                          cells it supplies
-      #   ------------   --------------------------   -----------------------
-      #   beta           glmmTMB, beta, ML            beta ML Wald, beta ML LRT
-      #   beta_reml      glmmTMB, beta, REML          beta REML Wald
-      #   m              glmmTMB, gaussian, ML        m ML Wald, m ML LRT
-      #   m_reml_satt    lmerTest::lmer (REML)        m REML Satterthwaite Wald
-      #                                               + Satterthwaite F omnibus
+      #   arm         fit                     cells it supplies
+      #   ---------   ---------------------   ---------------------------
+      #   m           gaussian, ML            Wald-z, Wald-Satterthwaite,
+      #                                       LRT (omnibus)
+      #   m_reml      gaussian, REML          Wald-z, Wald-Satterthwaite
+      #   beta        beta_family, ML         Wald-z, Wald-Satterthwaite,
+      #                                       LRT (omnibus)
+      #   beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
       #
-      # The seventh cell, "m REML Wald against a normal reference", needs no
-      # fit of its own: glmmTMB(REML = TRUE) on the Gaussian model and
-      # lmerTest::lmer return the same estimates and standard errors (checked
-      # on this data: max absolute SE difference 2.9e-10), so it is recovered
-      # downstream as 2 * pnorm(-|estimate / std.error|) from the
-      # m_reml_satt summaries. Fitting it separately would cost a quarter more
-      # compute for a numerically identical answer.
+      # The two Wald cells per arm are two readings of ONE fit and come out of
+      # summary_fun together (p_wald, p_satt), so the reference distribution
+      # can be varied with the estimator held fixed, and vice versa. The LRT
+      # is an omnibus test of the whole time factor and has one row per fit,
+      # so it lives in eval_fun; REML supplies no LRT (see eval_fun).
       #
-      # Asymmetry worth noting when reading the results: the beta arms have no
-      # small-sample omnibus available. REML removes the likelihood-ratio test
-      # (see eval_fun), and there is no Satterthwaite or Kenward-Roger
-      # machinery for a beta GLMM, so the only omnibus on the beta scale is
-      # the asymptotic ML chi-square. That is a property of the available
-      # tooling, not of this script.
+      # This replaces the earlier lmerTest arm. glmmTMB (>= 1.1.11) computes
+      # Satterthwaite degrees of freedom itself, for the beta family as well
+      # as the Gaussian one, so the small-sample correction is now available
+      # on both scales rather than on the M scale alone -- and every cell
+      # comes from the same fitting machinery, which removes lme4-vs-glmmTMB
+      # differences (convergence codes, singularity flags) from the
+      # comparison. On the Gaussian model the two implementations agree
+      # anyway: glmmTMB(REML = TRUE) and lmerTest::lmer returned the same
+      # estimates and standard errors on this data, to 2.9e-10.
       #
       # A fifth arm modelling dispersion by time (dispformula = ~time_permute)
       # was tried and dropped. Two measurements against this same permutation
@@ -456,14 +483,15 @@ tryCatch(
       )
 
       mm2 <- seqwrap_compose(
-        modelfun = lmerTest::lmer,
+        modelfun = glmmTMB::glmmTMB,
         data = m_subset,
         metadata = metapermute,
         samplename = "geo_accession",
         eval_fun = eval_fun,
         summary_fun = summary_fun,
         arguments = list(
-          formula = y ~ time_permute + (1 | participant)
+          formula = y ~ time_permute + (1 | participant),
+          REML = TRUE
         )
       )
 
@@ -529,14 +557,18 @@ tryCatch(
         tag(bm1_sum$summaries, "beta", "summaries"),
         tag(bm2_sum$summaries, "beta_reml", "summaries"),
         tag(mm1_sum$summaries, "m", "summaries"),
-        tag(mm2_sum$summaries, "m_reml_satt", "summaries")
+        tag(mm2_sum$summaries, "m_reml", "summaries")
       ) |>
         # Keep the time contrasts
         dplyr::filter(base::grepl("^time", term)) |>
-        # FDR is controlled ACROSS SITES within a term, not within a site
+        # FDR is controlled ACROSS SITES within a term, not within a site.
+        # Both reference distributions are adjusted, and separately: they are
+        # different p-values, so the BH ranking within a (model, term) is not
+        # the same in general and one q-value cannot stand for the other.
         dplyr::mutate(
           .by = c(model, term),
-          qval = stats::p.adjust(p.value, method = "BH")
+          qval_wald = stats::p.adjust(p_wald, method = "BH"),
+          qval_satt = stats::p.adjust(p_satt, method = "BH")
         ) |>
         dplyr::mutate(iter = i) |>
         dplyr::select(
@@ -546,17 +578,20 @@ tryCatch(
           term,
           estimate,
           std.error,
-          # Satterthwaite denominator df for the m_reml_satt arm, NA elsewhere
-          df,
-          p.value,
-          qval
+          # Asymptotic Wald, normal reference
+          p_wald,
+          qval_wald,
+          # Wald against t with Satterthwaite denominator df
+          ddf,
+          p_satt,
+          qval_satt
         )
 
       eval_i <- dplyr::bind_rows(
         tag(bm1_sum$evaluations, "beta", "evaluations"),
         tag(bm2_sum$evaluations, "beta_reml", "evaluations"),
         tag(mm1_sum$evaluations, "m", "evaluations"),
-        tag(mm2_sum$evaluations, "m_reml_satt", "evaluations")
+        tag(mm2_sum$evaluations, "m_reml", "evaluations")
       ) |>
         dplyr::mutate(iter = i)
 
