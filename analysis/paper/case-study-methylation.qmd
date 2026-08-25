@@ -552,23 +552,29 @@ We will use the *M-value scale* to add the effect to permuted data with effect a
 
 In the code chunk below, a single site is used to show the workflow. &beta; values are calculated from the `gset` object and transformed to M values. We are using the first row of the M value matrix and join the values with the meta data. Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.3) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both model types are fitted.
 
-We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set. In small samples, linear mixed model parameter p-values from the Wald test are anti-conservative [@luke2017]. When the restricted maximum likelihood (REML) is used in place of maximum likelihood and small sample size-corrections are used (Kenward-Roger ) estimate of the standard errors can be biased leading to inflated type 1 error rates when parameter estimates  are used for inference.   
+We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set. In small samples, linear mixed model parameter p-values from the Wald test are anti-conservative [@luke2017]. When the restricted maximum likelihood (REML) is used in place of maximum likelihood and small sample size-corrections are used (Kenward-Roger or Satterthwaite approximations of degrees of freedom) the type I error rates are controlled at the nominal level [@luke2017]. However, for the generalized linear mixed model (GLMM) with link functions, such as beta regression, the restricted maximum likelihood is not clearly defined [@maestrini2024]. When comparing different REML implementations, @maestrini2024 found that GLMM fitted with REML leads to a reduction in small sample bias and that the use of REML probably should be more widely adopted. The choice of algorithm can be made based on software availability [@maestrini2024]. REML is implemented also for GLMM in the glmmTMB package with the option `REML=TRUE`. For Gaussian models, the results from `glmmTMB` replicates the results of `lme4::lmer`. However, the documentation also says that performance of REML in non-Gaussian models should be verified by simulations (see `?glmmTMB::glmmTMB`).
+
+In addition to REML for mitigation of small sample bias, the Satterthwaite correction is widely adopted in Gaussian mixed-effects models to approximate the denominator degrees of freedom for t-tests of parameter estimates [@kuznetsova2017]. Similarly to REML estimation for GLMM's, the Satterthwaite approximation is indicated for use "at your own risk" (see `?glmmTMB::dof_satt`).
 
 
 ```{r}
+
+# Illustrating data preparation and model settings for a set of 
+# candidate models for the methylation data set.
 
 # Prepare data 
 beta_vals <- getBeta(gset, offset = 100)
 m_vals <- log2(beta_vals / (1 - beta_vals))
 
-
-
+# Setting the seed for site selection and time permutation
+set.seed(1)
 
 # Selecting a random site for testing
-y <- data.frame(y = m_vals[3474,]) |> 
+y <- data.frame(y = m_vals[sample(1:nrow(m_vals), 1),]) |> 
       tibble::rownames_to_column(var = "geo_accession" ) 
 
-set.seed(1)
+# Organizing the data into aformat suitable for single model 
+# fit. 
 dat <- metadata |> 
       select(geo_accession, participant, time) |> 
       inner_join(y) |>
@@ -603,8 +609,9 @@ temp_summary_fun <- function(m) {
 }
 
 
-# Fits 
+# Storing fits in a list 
 fits <- list()
+
 # Maximum likelihood M-values
 fits[[1]] <- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
                           data = dat)
@@ -628,7 +635,7 @@ fits[[4]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant),
 
 
 
-lapply(fits,temp_summary_fun) |> 
+out <- lapply(fits,temp_summary_fun) |> 
       bind_rows() |> 
       mutate(model = c("M-values",
                        "B-values",
@@ -637,19 +644,43 @@ lapply(fits,temp_summary_fun) |>
              estimator = c("ML", "ML", "REML", "REML"))
 
 
-
+# Illustrating the 
 es_mmod <- coef(summary(m_mod1))$cond["time_permute3_loading","Estimate"]
 es_betamod<- coef(summary(beta_mod1))$cond["time_permute3_loading","Estimate"]
-
 
 es_betamod <- es_betamod / log(2)
 ```
 
+
+```{r}
+#| echo: false
+#| label: tbl-model-comp-illustration
+
+
+out |> 
+            dplyr::select(model,estimator, lrt_p, wald_p, wald_p_satter) |> 
+      gt() |> 
+
+      gt::cols_label(lrt_p = md("Likelihood<br>ratio test"), 
+                     wald_p = "Wald z/t-test", 
+                     wald_p_satter = md("Wald t-test w.<br>Satterthwaite DDF"), 
+                     estimator = "Estimator", 
+                     model = "Model") 
+      
+
+
+```
+
+
+
 The estimated effects (`r round(es_mmod,2)` and `r round(es_betamod,2)`) for the model on M-values and &beta; values respectively are comparable but will differ due to compression in the &beta; values model.
 
-The fixed effect sizes are multiplied by 1 or -1 in a balanced fashion to create the direction of the effect. At an extreme site (&beta;-values close to 0 or 1), adding or subtracting &delta; will either compress towards the boundary or move estimates towards 0.5. Since these scenarios are not equally detectable and the two models disagree about the variance function in extreme regions, we can evaluate the effect of selecting one model over the other.
+For the single site used in the illustration above, p-values differs between models (M- vs &beta;-values), estimator (ML vs. REML), and usage of the Satterthwaite's approximation of the degrees of freedom @tbl-model-comp-illustration). The will be the basis of evaluation of the models in the permutation experiment. 
+
+In the permutation experiment, the added fixed effect sizes are multiplied by 1 or -1 in a balanced fashion to create the direction of the effect. At an extreme site (&beta;-values close to 0 or 1), adding or subtracting &delta; will either compress towards the boundary or move estimates towards 0.5. Since these scenarios are not equally detectable and the two models disagree about the variance function in extreme regions, we can evaluate the effect of selecting one model over the other also for the mean estimate.
 
 The source code for the permutation experiment can be run in full using the script `analysis/R/methylation-error-permutation.R`. Below we check if files are available from a previous run, if not the script runs and stores data in `analysis/data/derived_data/permutation/`. 
+
 
 
 ```{r}
@@ -658,19 +689,21 @@ The source code for the permutation experiment can be run in full using the scri
 # Versioned to match the script: permutation/ holds the earlier two-arm run
 # (beta, m) with the old evaluation column names, permutation_v2/ the
 # four-arm run (beta, beta_reml, m, m_reml_satt).
-out_dir <- here::here("analysis/data/derived_data/permutation_v2")
+out_dir <- here::here("analysis/data/derived_data/permutation_v3")
 perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
 
 if (length(perm_files) == 0) source(
       here::here("analysis/R/methylation-error-permutation.R")
       )
 
+n_perm <- length(perm_files) 
+
+
 ```
 
 ### Loading permutation study results
 
-@tbl-permutation-evals shows the number of failed models among all model fits for the four fitted model specifications. A total of 500 sets of permutations where performed with 1000 sites in each set over 5 &beta; value strata.
-
+A total of `r n_perm` sets of permutations where performed with 1000 sites in each set over 5 &beta; value strata. @tbl-permutation-evals shows the number of failed models among all model fits for the four fitted model specifications. 
 
 ```{r}
 #| label: reading-permutation-data
@@ -686,6 +719,8 @@ perm       <- lapply(perm_files, readRDS)
 perm_summaries <- dplyr::bind_rows(lapply(perm, `[[`, "summaries"))
 perm_designs   <- dplyr::bind_rows(lapply(perm, `[[`, "design"))
 perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
+
+
 
 # Which coefficients with the simulated effect.
 #
@@ -715,63 +750,105 @@ perm_dat <- perm_summaries |>
 
 stopifnot(any(perm_dat$is_alt))
 
-# The seventh inferential cell: REML standard errors scored against a NORMAL
-# reference, i.e. the m_reml_satt fit without its Satterthwaite correction.
-# It needs no fit of its own -- glmmTMB(REML = TRUE) on the Gaussian model and
-# lmerTest::lmer agree to 2.9e-10 on the standard errors and exactly on the
-# estimates -- so it is recovered here from the stored columns. Separating it
-# out is what lets the REML effect and the reference-distribution effect be
-# read off independently rather than as one bundled "lmerTest workflow".
-perm_dat <- dplyr::bind_rows(
-      perm_dat,
-      perm_dat |>
-            dplyr::filter(model == "m_reml_satt") |>
-            dplyr::mutate(
-                  model = "m_reml",
-                  df = NA_real_,
-                  p.value = 2 * stats::pnorm(-abs(estimate / std.error))
-            ) |>
-            # qval must be recomputed: BH is applied across sites within a
-            # term, and these are different p-values from the ones the script
-            # adjusted.
-            dplyr::mutate(
-                  .by = c(model, iter, term),
-                  qval = stats::p.adjust(p.value, method = "BH")
-            )
-)
-
 # Convergence failures are dropped silently by seqwrap_summarise (NULL entries
 # are removed before rbind), so differential failure between the models would
 # quietly change what is being compared.
-#
-# `singular` is the class-native degeneracy flag and is NOT comparable across
-# arms: lme4::isSingular() fires on any zero variance component (common with 8
-# participants) while glmmTMB reports only a non-positive-definite Hessian.
-# Pooling the two would make the lmerTest arm look like it fails on a quarter
-# of the sites when it is fitting fine. Failure is therefore defined as a
-# non-zero convergence code or an unusable p-value; singularity is reported
-# alongside as a separate, per-arm diagnostic.
+
+# Sort out number of failed p-values (Wald statistics)
+pvals_wald <- perm_summaries |> 
+      summarise(.by = model, 
+                n_coefs_wald = n(), 
+                failed_p = sum(is.na(p_wald)), 
+                failed_satt = sum(is.na(p_satt)))
+
+# Sort out number of p-values (LR test)
+pvals_lrt <- perm_evals |> 
+      summarise(.by = model, 
+                n_models_lrt = n(), 
+                failed_lrt = sum(is.na(pval))) |> 
+      mutate(failed_lrt = if_else(grepl("_reml", model), NA, failed_lrt)) 
+
+
 
 perm_evals |>
       dplyr::summarise(.by = c(model),
                        n_fits     = dplyr::n(),
-                       n_fail     = sum(convergence != 0 | is.na(pval)),
-                       prop_fail  = mean(convergence != 0 | is.na(pval)),
-                       n_singular = sum(singular),
-                       n_pdHess   = sum(!singular)) |> 
-      gt()
+                       n_fail     = sum(convergence != 0),
+                       prop_fail  = mean(convergence != 0)) |> 
+      inner_join(pvals_wald) |> 
+      inner_join(pvals_lrt) |> 
+      
+      mutate(estimator = if_else(grepl("_reml", model), "REML", "ML"), 
+             model = gsub("_reml", "", model), 
+             model = if_else(model == "beta", "&beta;", "M")) |> 
+      dplyr::select(model, estimator, n_fits, n_fail, n_coefs_wald, failed_p, 
+                    failed_satt, n_models_lrt, failed_lrt) |> 
+      gt() |> 
+      gt::cols_label(model = "Model", 
+                     estimator = "Estimator", 
+                     n_fits = "Number of fits", 
+                     n_fail = "Failed fits", 
+                     n_coefs_wald = md("Number of <br>parameter values"), 
+                     failed_p = md("Number of failed <br>Wald p-values"), 
+                     failed_satt = md("Number of <br>failed Satterthwaite p-values"), 
+                     n_models_lrt = md("Number of models<br>evaluated for LRT"), 
+                     failed_lrt = "Failed LRT p-values") |> 
+      fmt_markdown(columns = "model")
+      
 ```
+
+
+The Satterthwaite approximation failed to produce valid degrees of freedom in some cases (@tbl-permutation-evals). Closer examination of these cases showed that the random effect variation was pushed towards zero @fig-re-sd-failedsatterthwaite. However, the number of failed degrees of freedom calculations varied between models indicating that the full model is not dropped in such cases. 
+
+
+```{r}
+#| echo: false
+#| label: fig-re-sd-failedsatterthwaite
+
+
+# How many effects if fail?
+#perm_summaries |> 
+#            filter(is.na(p_satt)) |> 
+#            mutate(type = "Failed DDF") |> 
+#      summarise(.by = c(model, iter, target), 
+#                n = n())
+
+
+
+bind_rows(
+      perm_summaries |> 
+            filter(is.na(p_satt)) |> 
+            distinct(model, iter, target) |> 
+            mutate(type = "Failed DDF"), 
+      perm_summaries |> 
+            filter(!is.na(p_satt)) |> 
+            distinct(model, iter, target) |> 
+            mutate(type = "Successful DDF")) |> 
+      inner_join(perm_evals) |> 
+      mutate(Estimator = if_else(grepl("_reml", model), "REML", "ML"), 
+             model = gsub("_reml", "", model), 
+             Model = if_else(model == "beta", "&beta;", "M")) |> 
+
+      ggplot(aes(type, re_sd)) + geom_boxplot() + 
+      facet_wrap(Estimator ~ Model, labeller = label_both) + 
+      labs(x = "", 
+           y = "Random effect &sigma;") + 
+      theme(strip.text = ggtext::element_markdown(), 
+            axis.title.y = ggtext::element_markdown())
+      
+
+```
+
 
 
 ### Determining the type I error rate
 
-The type I error rates are estimated from sites without added effects. The unaffected contrasts on a site with an added effect are nominally null, but a spiked site is not exchangeable with an unspiked one on *any* contrast: adding the effect changes the fitted mean of one time-point, and because the design is unbalanced (8/8/8/7/7 samples per time-point, with one participant contributing only three samples) the shift is not orthogonal to the estimated variance components. Under the &beta; likelihood the variance is in addition a function of the mean, so the common dispersion parameter, and with it the other contrasts, is affected as well. 
-
-
+The type I error rates are estimated from sites and parameter estimates without added effects. The unaffected parameters on a site with an added effect are nominally null, but could affect the the full model. However, preliminary inspection of this effect did not raise concerns. Therefore, all null-parameters are used in the estimating the type I error rate. 
 
 ```{r}
 #| label: fig-permutation-type1
 #| eval: true
+#| fig-cap: "Among true null effects p-value distributions indicated miscalibrated p-values from LR-test, the uncorrected Wald procedure and maximum likelihood fits (A). Conversely, p-value distributions from REML fits with the Satterthwaite DDF correction displayed a uniform distribution. Calculating the type I error rate indicated that the type I error rate was close to the nominal 5% rate for p-values from REML fits calculated with the Satterthwaite DDF across all strata of &beta; values (B)."
 
 
 # This figure extracts the &beta; values and shows the strata 
@@ -829,26 +906,92 @@ fig1 <- dd |>
 
 null_dat <- perm_dat |> 
       # Keep null effects in non affected sites
-     # filter(!(delta != 0 & term == "time_permute3_loading")) 
+       filter(!(delta != 0 & term == "time_permute3_loading")) |> 
+      # filter NA in p-values
+      filter(!is.na(p_satt))
 
       # Alternative, keep only all nulls
-      filter(delta == 0) 
+      # filter(delta == 0) 
+     
+# Collect LRT test statistics
+lrt_null <- perm_evals |> 
+      filter(convergence == 0) |> 
+       dplyr::inner_join(perm_designs,
+                        by = c("iter", "target" = "id")) |> 
+      filter(delta == 0) |> 
       
-s1 <- null_dat |>
-      filter(convergence == 0, !is.na(p.value)) |> 
+      # fail safe if mssing p-vals from larger 
+      # simulation
+      filter(!is.na(pval)) |> 
+      mutate(Estimator = "ML", 
+             Model = if_else(model == "beta", "&beta;", "M"), 
+             Type = "LRT") |> 
+      dplyr::select(Model, Type, Estimator, pval) 
 
-    dplyr::summarise(.by = c(model, betacat, iter, term),
+fig2 <- null_dat |>
+      filter(convergence == 0) |> 
+      dplyr::select(model, iter, betacat, delta, 
+                    target, term, p_wald, p_satt) |> 
+      pivot_longer(cols = p_wald:p_satt, 
+                   names_to = "type", 
+                   values_to = "pval") |> 
+      mutate(Estimator = if_else(grepl("_reml", model), "REML", "ML"), 
+             model = gsub("_reml", "", model), 
+             Model = if_else(model == "beta", "&beta;", "M"), 
+             Type = if_else(type == "p_satt", "Satterthwaite DDF", 
+                            "Wald p-values")) |> 
+      filter(!is.na(pval)) |> 
+      dplyr::select(Model, Type, Estimator, pval) |> 
+      bind_rows(lrt_null) |> 
+      ggplot(aes(pval)) + 
+      geom_histogram(aes(y = after_stat(density)),
+                     boundary = 0) + 
+      facet_wrap(Model ~ Estimator + Type, labeller = label_both)  + 
+      theme(strip.text = ggtext::element_markdown()) + 
+      labs(x = "p-value", 
+           y = "Density")
+
+ 
+# Extraction of error rates are aggregated over several steps
+
+
+s1 <- null_dat |>
+      filter(convergence == 0) |> 
+      dplyr::select(model, iter, betacat, delta, 
+                    target, term, p_wald, p_satt) |> 
+      pivot_longer(cols = p_wald:p_satt, 
+                   names_to = "type", 
+                   values_to = "pval") |> 
+      
+      bind_rows(
+           perm_evals |> 
+             filter(convergence == 0) |> 
+      # fail safe if mssing p-vals from larger 
+      # simulation
+            filter(!is.na(pval)) |> 
+            dplyr::inner_join(perm_designs,
+                        by = c("iter", "target" = "id")) |> 
+            filter(delta == 0) |> 
+            mutate(term = "Omnibus", 
+                   type = "LRT") |> 
+            
+      dplyr::select(model, iter, betacat, delta, target, term, type, 
+                    pval)) |> 
+      filter(!is.na(pval)) |> 
+
+      dplyr::summarise(.by = c(model, betacat, iter, term, type),
                      n = dplyr::n(), 
-                     sig = sum(p.value < 0.05),       
+                     sig = sum(pval < 0.05),       
                      error = sig / n)
+
 
 # Collapse strata and terms within an iteration: the permutation is the     
 # resampling unit, so one error rate per iteration per model.
 s1_iter <- s1 |>
-      dplyr::summarise(.by = c(model, iter), error = mean(error))
+      dplyr::summarise(.by = c(model, iter, type), error = mean(error))
 
 model_error_type1 <- s1_iter |>
-      dplyr::summarise(.by = c(model),
+      dplyr::summarise(.by = c(model, type),
                        m.error = mean(error),
                        s.error = stats::sd(error),
                        n_iter  = dplyr::n(),
@@ -857,7 +1000,7 @@ model_error_type1 <- s1_iter |>
                     hi = m.error + 1.96 * mcse)
 
 t1e <- s1_iter |>
-    dplyr::summarise(.by = c(model),
+    dplyr::summarise(.by = c(model, type),
                      m.error = mean(error), 
                      s.error = stats::sd(error),
                      n_iter = dplyr::n(), 
@@ -865,73 +1008,17 @@ t1e <- s1_iter |>
 
 
 model_error_type1_betacat <- s1 |>
-      dplyr::summarise(.by = c(model, iter, betacat), error = mean(error)) |> 
-      dplyr::summarise(.by = c(model, betacat),
+      dplyr::summarise(.by = c(model, iter, type, betacat), 
+                       error = mean(error)) |> 
+      dplyr::summarise(.by = c(model, betacat, type),
                        m.error = mean(error),
                        s.error = stats::sd(error),
                        n_iter  = dplyr::n(),
                        mcse    = s.error / sqrt(n_iter)) |>
       dplyr::mutate(lo = m.error - 1.96 * mcse,
-                    hi = m.error + 1.96 * mcse) |> 
-      mutate(type = "Wald")
+                    hi = m.error + 1.96 * mcse) 
 
 
-# Next we extract the omnibus p-value from the LRT-Chi-square test
-# `stat` is the omnibus test statistic: a chi-square LRT for the glmmTMB arms
-# and a Satterthwaite F for m_reml_satt, so it is comparable across arms only
-# through `pval`. `ddf` is the Satterthwaite denominator df, NA for the LRTs.
-#
-# The REML arms have NO valid omnibus (a restricted likelihood ratio across
-# different fixed-effect designs is meaningless), so eval_fun records test =
-# "none" and pval = NA for them. The !is.na(pval) filter below therefore drops
-# them from this table by construction -- they contribute Wald contrasts only.
-omnibus_null_dat <-  perm_evals |> 
-      select(target, test, df, ddf, stat, pval, convergence, iter, model) |> 
-      dplyr::inner_join(perm_designs,
-                        by = c("iter", "target" = "id")) |> 
-      filter(delta == 0) |> 
-      # Failed fits carry no test; keeping them in the denominator would bias
-      # the error rate downwards, and it can do so unevenly across arms.
-      filter(convergence == 0, !is.na(pval))
-
-# Omnibus "stage 1" aggergation
-omnibus_s1 <- omnibus_null_dat |>
-    dplyr::summarise(.by = c(model, betacat, iter),
-                     n = sum(!is.na(pval)), 
-                     sig = sum(pval < 0.05, na.rm = TRUE),       
-                     error = sig / n)
-
-# Collapse strata and terms within an iteration: the permutation is the     
-# resampling unit, so one error rate per iteration per model.
-omnibus_s1_iter <- omnibus_s1 |>
-      dplyr::summarise(.by = c(model, iter), error = mean(error))
-
-# Per model error rates
-omnibus_t1e <- omnibus_s1_iter |>
-    dplyr::summarise(.by = c(model),
-                     m.error = mean(error), 
-                     s.error = stats::sd(error),
-                     n_iter = dplyr::n(), 
-                     mcse = s.error / sqrt(n_iter))
-
-# Per betacat and model, omnibus test
-model_error_type1_betacat_omnibus <- omnibus_s1 |>
-      dplyr::summarise(.by = c(model, iter, betacat), error = mean(error)) |> 
-      dplyr::summarise(.by = c(model, betacat),
-                       m.error = mean(error),
-                       s.error = stats::sd(error),
-                       n_iter  = dplyr::n(),
-                       mcse    = s.error / sqrt(n_iter)) |>
-      dplyr::mutate(lo = m.error - 1.96 * mcse,
-                    hi = m.error + 1.96 * mcse) |> 
-      mutate(type = "LRT")
-
-
-# Combnine data for the plot
-model_error_type1_betacat_combined <- bind_rows(
-      model_error_type1_betacat, 
-      model_error_type1_betacat_omnibus
-)
 
 
 
@@ -940,7 +1027,7 @@ strip <- ggh4x::strip_themed(
       background_x = lapply(colors, \(x) element_rect(fill = scales::alpha(x, 0.3),
                                                   colour = NA)))
 
-fig2 <- model_error_type1_betacat_combined |> 
+fig3 <- model_error_type1_betacat |> 
       mutate(betacat = case_when(betacat == "xlow" ~ "0 - 0.2", 
                                  betacat == "low" ~ "0.2 - 0.4",  
                                  betacat == "mid" ~ "0.4 - 0.6", 
@@ -951,56 +1038,76 @@ fig2 <- model_error_type1_betacat_combined |>
                                    beta        = "&beta;<sub>ML</sub>",
                                    beta_reml   = "&beta;<sub>REML</sub>",
                                    m           = "M<sub>ML</sub>",
-                                   m_reml      = "M<sub>REML</sub>",
-                                   m_reml_satt = "M<sub>Satt</sub>")) |> 
+                                   m_reml      = "M<sub>REML</sub>"), 
+             type = dplyr::recode(type, 
+                                  p_wald = "Wald p-values", 
+                                  p_satt = "Satterthwaite DDF", 
+                                  LRT = "Omnibus LRT")) |> 
       
       
-      ggplot(aes(model,  100 * m.error, shape = type))  +
+      ggplot(aes(model,  100 * m.error, shape = type, 
+                 fill = type))  +
       
       geom_errorbar(aes(ymin = 100 * lo,
                         ymax = 100 * hi), 
                     width = 0.5, 
-                    position = position_dodge(width = 0.2)) +
+                    position = position_dodge(width = 0.3)) +
       geom_hline(yintercept = 5, lty = 2, 
                  color = "gray") + 
       
-      geom_point(size = 3, fill = "gray50", 
-                    position = position_dodge(width = 0.2)) +
+      geom_point(size = 3, position = position_dodge(width = 0.3)) +
       ggh4x::facet_wrap2(~ betacat, ncol = 5, 
                          strip = strip) +
              theme_classic() + 
       theme(axis.title.x = ggtext::element_markdown(),
             axis.text.x = ggtext::element_markdown(), 
-            legend.position = "none")  +
+            legend.position = "bottom", 
+            legend.title = element_blank())  +
       
-      scale_shape_manual(values = c(21, 24)) + 
+      scale_shape_manual(values = c(21, 24, 23)) + 
+      scale_fill_manual(values = colors) +
+      scale_y_continuous(breaks = c(0, 5, 7.5, 10), 
+                         limits = c(0, 10), 
+                         expand = c(0,0)) +
       labs(x = "Model", 
            y = "Type I error rate (%)")
       
-######### False discovery rate ######################################
+
+# Combine plot
+
+fig <- cowplot::plot_grid(fig2, 
+                         cowplot::plot_grid(fig1, fig3, ncol = 1, 
+                   rel_heights = c(0.4, 1), 
+                   align = "v", 
+                   axis = "lr", 
+                   labels = c("B", "")), 
+                   rel_heights = c(1, 1), 
+                   labels = c("A", ""), 
+                   ncol = 1)
 
 
-qval_errors <- null_dat |>
-      filter(term != "3_loading") |> 
-    dplyr::summarise(.by = c(model, betacat, iter, term),
-                     n = dplyr::n(), 
-                     sig = sum(qval < 0.05, na.rm = TRUE),       
-                     error = sig / n)
-qval_errors_iter <- qval_errors |>
-      dplyr::summarise(.by = c(model, iter), error = mean(error))
-
-
-model_error_fdr <- qval_errors_iter |>
-      dplyr::summarise(.by = c(model),
-                       m.error = mean(error),
-                       s.error = stats::sd(error),
-                       n_iter  = dplyr::n(),
-                       mcse    = s.error / sqrt(n_iter)) |>
-      dplyr::mutate(lo = m.error - 1.96 * mcse,
-                    hi = m.error + 1.96 * mcse)
 
 
 ```
+
+
+### Determining the power
+
+
+
+
+```{r}
+
+perm_summaries |> 
+       dplyr::inner_join(perm_designs,
+                        by = c("iter", "target" = "id")) |> 
+      filter(term == "time_permute3_loading", 
+             delta != 0) |> 
+      ggplot(aes())
+
+
+```
+
 
 
 
