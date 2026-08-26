@@ -1,5 +1,5 @@
 # This script runs the permutation study on the methylation data set from
-# seaborne et al. The resulting data is evaluated in case-study-methylation.qmd
+# Seaborne et al. The resulting data is evaluated in case-study-methylation.qmd
 # and in the main paper source.
 
 # The script saves permutation results (one file per iteration) in the
@@ -159,10 +159,9 @@ assign_spike <- function(sub, cells, n_per_cell) {
 # placed in eval_fun rather than in summary_fun.
 #
 # All four arms are fitted with glmmTMB, so the diagnostics are directly
-# comparable across arms. The earlier lmerTest arm is gone: glmmTMB computes
-# Satterthwaite degrees of freedom itself (see summary_fun below), which also
-# makes the small-sample reference distribution available on the beta scale,
-# where lmerTest could not follow.
+# comparable across arms. glmmTMB computes Satterthwaite degrees of freedom
+# itself (see summary_fun below), which also makes the small-sample reference
+# distribution available on the beta scale.
 #
 # m$fit$convergence is 0 when the optimiser reports a satisfactory solution;
 # m$sdr$pdHess is TRUE when the Hessian is positive definite (no singular fit,
@@ -185,6 +184,7 @@ eval_fun <- function(m) {
     stop("unsupported model class: ", paste(class(m), collapse = "/"))
   }
 
+  # Extract the participant-level SD
   vc <- glmmTMB::VarCorr(m)$cond$participant
 
   # A REML fit has no valid likelihood-ratio test of a fixed effect: the
@@ -197,6 +197,7 @@ eval_fun <- function(m) {
   # Save the drop1 output
   a <- if (reml) NULL else drop1(m, test = "Chisq")
 
+  # The output data frame
   data.frame(
     convergence = m$fit$convergence,
     singular = !m$sdr$pdHess,
@@ -213,8 +214,8 @@ eval_fun <- function(m) {
 # Wald summaries, one row per fixed effect and two reference distributions per
 # row:
 #
-#   p_wald  the asymptotic Wald test, estimate / std.error against a normal
-#   p_satt  the same statistic against a t distribution with Satterthwaite
+# - p_wald: the asymptotic Wald test, estimate / std.error against a normal
+# - p_satt: the same statistic against a t distribution with Satterthwaite
 #           denominator degrees of freedom (`ddf`)
 #
 # Both come from coef(summary(.))$cond, i.e. from the same fit, so the ONLY
@@ -222,9 +223,10 @@ eval_fun <- function(m) {
 # That is what makes the small-sample correction readable on its own,
 # separately from the ML/REML contrast carried by the arms.
 #
-# summary(ddf = "satterthwaite") is a glmmTMB >= 1.1.11 feature and works for
+# summary(ddf = "satterthwaite") is a glmmTMB >= 1.1.13 feature and works for
 # the beta family as well as the Gaussian one, which is what allows the
 # small-sample cell to be filled on both scales.
+# see the NEWS https://cran.r-project.org/web/packages/glmmTMB/news.html
 #
 # The `cond` component is taken explicitly rather than relying on a default:
 # any arm carrying a dispersion or zero-inflation model has coefficients named
@@ -280,10 +282,10 @@ n_perm <- 500 #
 # runs could not be told apart. Bump the suffix whenever the set of model arms
 # or the eval_fun / summary_fun columns change. Earlier runs:
 #
-#   permutation      two arms (beta, m), old eval column names (pdHess, lrt)
-#   permutation_v2   four arms (beta, beta_reml, m, m_reml_satt), where the
+# permutation: two arms (beta, m), old eval column names (pdHess, lrt)
+# permutation_v2: four arms (beta, beta_reml, m, m_reml_satt), where the
 #                    Satterthwaite arm was an lmerTest fit on the M scale only
-#   permutation_v3   four glmmTMB arms (beta, beta_reml, m, m_reml) with both
+# permutation_v3: four glmmTMB arms (beta, beta_reml, m, m_reml) with both
 #                    Wald reference distributions stored per contrast
 out_dir <- here::here("analysis/data/derived_data/permutation_v3")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -325,9 +327,8 @@ Sys.setenv(
 # directory removes that false alarm while still catching a genuine fallback to
 # the system library.
 # All four arms are glmmTMB fits, and the Satterthwaite degrees of freedom are
-# computed by glmmTMB itself (>= 1.1.11), so no further package is needed on
-# the workers -- Kenward-Roger would have pulled in pbkrtest, and the earlier
-# lmerTest arm is gone.
+# computed by glmmTMB itself (>= 1.1.13), so no further package is needed on
+# the workers.
 .pkgs <- c(
   "seqwrap",
   "glmmTMB"
@@ -420,7 +421,7 @@ tryCatch(
       # is an omnibus test of the whole time factor and has one row per fit,
       # so it lives in eval_fun; REML supplies no LRT (see eval_fun).
       #
-      # This replaces the earlier lmerTest arm. glmmTMB (>= 1.1.11) computes
+      # This replaces the earlier lmerTest arm. glmmTMB (>= 1.1.13) computes
       # Satterthwaite degrees of freedom itself, for the beta family as well
       # as the Gaussian one, so the small-sample correction is now available
       # on both scales rather than on the M scale alone -- and every cell
@@ -428,21 +429,12 @@ tryCatch(
       # differences (convergence codes, singularity flags) from the
       # comparison. On the Gaussian model the two implementations agree
       # anyway: glmmTMB(REML = TRUE) and lmerTest::lmer returned the same
-      # estimates and standard errors on this data, to 2.9e-10.
+      # estimates and standard errors on this data in pilot runs.
+      # This is also discussed in the help files for glmmTMB "Behavior of REML=TRUE
+      # for Gaussian responses matches lme4::lmer."
       #
-      # A fifth arm modelling dispersion by time (dispformula = ~time_permute)
-      # was tried and dropped. Two measurements against this same permutation
-      # null ruled it out. First, there is nothing to model: the LRT of
-      # dispformula ~time against ~1 rejects at 23.9% on the real labels but
-      # 33.4% on permuted labels, so the real data shows LESS apparent
-      # heteroscedasticity than a null with none by construction. Second, it
-      # makes the problem this study is about worse -- paired on the same
-      # sites, Wald type I at alpha = 0.05 rose from 7.8% to 10.6%, because
-      # four extra precision parameters estimated from 7-8 observations each
-      # give noisy standard errors that a normal reference does not correct
-      # for. The idea is sound in principle (it is the Welch situation), but
-      # the small-sample reference distribution it needs does not exist for a
-      # beta GLMM.
+      #
+      # Set up all models
       bm1 <- seqwrap_compose(
         modelfun = glmmTMB::glmmTMB,
         data = beta_subset,
@@ -530,13 +522,12 @@ tryCatch(
 
       ## (6) Collect -------------------------------------------------------
       #
-      # seqwrap_summarise() OMITS an element entirely when every target failed
+      # seqwrap_summarise() omits an element entirely when every target failed
       # at that stage -- it does not return an empty data frame. A model arm
       # whose eval_fun raises on every fit therefore arrives here as NULL, and
       # `NULL |> mutate()` fails with "no applicable method for 'mutate'
-      # applied to an object of class NULL", several hundred model fits after
-      # the actual cause. tag() turns that into a message naming the arm and
-      # the stage.
+      # applied to an object of class NULL" tag() turns that into a message
+      # naming the arm and the stage.
       tag <- function(x, arm, slot) {
         if (is.null(x) || !NROW(x)) {
           stop(

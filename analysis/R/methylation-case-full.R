@@ -3,74 +3,32 @@
 # normalized gset.
 #
 # The model arms are the SAME four arms as in the permutation study
-# (analysis/R/methylation-error-permutation.R), so that the type I error rates
-# measured there apply to the tests reported here:
+# (analysis/R/methylation-error-permutation.R) with the exception that LRT and
+# Satterthwaite in ML are not included in the full run.
+# Type I error rates from the permutation apply to the tests reported here:
 #
-#   arm         fit                     tests reported
-#   ---------   ---------------------   ---------------------------
-#   m           gaussian, ML            Wald-z
-#   m_reml      gaussian, REML          Wald-z, Wald-Satterthwaite
-#   beta        beta_family, ML         Wald-z
-#   beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
+# arm         fit                     tests reported
+# ---------   ---------------------   ---------------------------
+# m           gaussian, ML            Wald-z
+# m_reml      gaussian, REML          Wald-z, Wald-Satterthwaite
+# beta        beta_family, ML         Wald-z
+# beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
 #
-# Three things differ from the permutation study by design:
+# Two things differ from the permutation study by design:
 #
-#   * No omnibus LRT. The permutation study establishes the type I error
-#     behaviour of the omnibus test; the full run reports per-contrast tests
-#     only, so eval_fun does NOT call drop1() and therefore refits nothing.
-#     drop1(test = "Chisq") refits the model once per dropped term, which at
-#     ~770 000 sites is the single most expensive thing this run could do.
+# - No omnibus LRT. The permutation study establishes the type I error
+# behaviour of the omnibus test; the full run reports per-contrast tests
+# only, so eval_fun does NOT call drop1() and therefore refits nothing.
+# drop1(test = "Chisq") refits the model once which is expensive.
 #
-#   * Satterthwaite denominator df are computed on the REML arms ONLY. The
-#     permutation study fills all four (estimator x reference) cells, and it
-#     is what rules the ML+Satterthwaite cell out for the full run -- type I
-#     error at alpha = 0.05 over 147 permutations, null contrasts:
-#
-#                      Wald-z        Satterthwaite
-#         M     ML     8.12 %        7.03 %
-#         M     REML   6.24 %        5.18 %
-#         beta  ML     8.20 %        7.09 %
-#         beta  REML   6.36 %        5.33 %
-#
-#     (MCSE 0.22-0.29). ML+Satterthwaite is worse than REML with a plain
-#     normal reference, so on an ML fit the correction does not recover what
-#     changing estimator would have given -- and it is the most expensive
-#     thing in the run. There are three reasons behind that measurement, and
-#     none of them is specific to this data set:
-#
-#       1. The Satterthwaite construction (Giesbrecht & Burns 1985; Fai &
-#          Cornelius 1996) corrects for theta being ESTIMATED rather than
-#          known. It corrects variability, not bias -- and ML variance
-#          components are biased downwards because they do not discount the
-#          df spent on the fixed effects. No reference distribution repairs a
-#          systematically small standard error. It is the same reason
-#          Kenward-Roger, which does carry a bias adjustment to the
-#          fixed-effect covariance, is derived for REML only.
-#       2. The correction is also WEAKER under ML, in the same direction as
-#          that bias: median ddf on these data is ~30.5 for the ML arms
-#          against ~26.5-27.9 for the REML arms, on the same 38 observations
-#          and the same 5 fixed effects.
-#       3. glmmTMB:::dof_satt builds the covariance of the variance
-#          parameters as the inverse Hessian of whatever objective was
-#          optimised, at model$fit$par. On a REML fit that vector is
-#          (betadisp, theta) -- the classical construction. On an ML fit it
-#          is (beta x 5, betadisp, theta), so the fixed effects sit inside
-#          the matrix being inverted. For a Gaussian LMM beta and theta are
-#          orthogonal and the extra block is largely inert; for the beta
-#          family the variance is a function of the mean, the block is not
-#          zero, and the ddf absorbs fixed-effect uncertainty that the
-#          published formula does not contain.
-#
-#     The ML arms therefore keep p_wald and carry ddf / p_satt as NA, so the
-#     four arms still bind to a rectangular table. Any aggregation over the
-#     reference distributions has to treat p_satt as missing for those arms.
-#
-#   * Each arm is a SEPARATE seqwrap() call and is cached separately, so the
-#     elapsed time of every arm is recorded on its own (`elapsed_time` on the
-#     seqwrap result, plus the per-arm meta sidecar written below).
+# - Satterthwaite denominator df are computed on the REML arms ONLY. The
+# permutation study fills all four (estimator x reference).
+# ML+Satterthwaite is removed here for two reasosns, it did not solve the
+# type 1 error rate and pilot run indicated a large time cost.
+# Clean ML is kept for reference.
 #
 # Where Satterthwaite IS computed, both reference distributions come out of
-# ONE fit, in one pass of summary_fun (see summary_fun_wald below): the
+# a single fit, in one pass of summary_fun (see summary_fun_wald below): the
 # denominator df needs a second differentiation of the likelihood, which is
 # not free, but it is paid once per fit, on the worker, and does not require
 # the model to be fitted again.
@@ -84,10 +42,6 @@ library(ggplot2)
 library(stringr)
 library(maxprobes) # For filtering cross-reactive probes
 library(seqwrap)
-
-
-# Load color scale
-source(here::here("analysis/figures/figure-opts.R"))
 
 
 # Detect number of cores
@@ -145,7 +99,9 @@ beta_vals <- getBeta(gset, offset = 100)
 m_vals <- log2(beta_vals / (1 - beta_vals))
 
 
-# No need to squeeze beta values away from the boundaries: (y(n - 1) + 0.5) / n
+# No need to squeeze beta values away from the boundaries. As we use c=100
+# 0 and 1 are not included in the beta values. Otherwise, squeezer:
+# (y(n - 1) + 0.5) / n
 # n_obs     <- ncol(beta_vals)
 # beta_vals <- (beta_vals * (n_obs - 1) + 0.5) / n_obs
 
@@ -166,7 +122,7 @@ mdf <- data.frame(m_vals) |>
 
 # The two matrices hold the same data as the two data frames, and each is
 # ~230 MB at this number of sites. The fits below run for hours with a results
-# object of comparable size alive in memory, so the duplicates go here.
+# object of comparable size alive in memory, so the duplicates are removed here.
 rm(beta_vals, m_vals)
 gc()
 
@@ -174,7 +130,7 @@ gc()
 # Evaluation function for the full setup ##################################
 #
 # One row per model fit: convergence diagnostics only. There is NO omnibus
-# test here, and therefore no drop1() and no refitting -- see the header.
+# test here, and therefore no drop1() and no refitting, see above.
 #
 # m$fit$convergence is 0 when the optimiser reports a satisfactory solution.
 # m$sdr$pdHess is TRUE when the Hessian is positive definite (no singular fit,
@@ -216,8 +172,8 @@ eval_fun <- function(m) {
 #
 # One row per fixed effect and two reference distributions per row:
 #
-#   p_wald  the asymptotic Wald test, estimate / std.error against a normal
-#   p_satt  the same statistic against a t distribution with Satterthwaite
+# p_wald: the asymptotic Wald test, estimate / std.error against a normal
+# p_satt: the same statistic against a t distribution with Satterthwaite
 #           denominator degrees of freedom (`ddf`)
 #
 # Both come from coef(summary(.))$cond, i.e. from the SAME fit, so the only
@@ -226,14 +182,10 @@ eval_fun <- function(m) {
 # separately from the ML/REML contrast carried by the arms -- and it is why
 # the two do not need two runs.
 #
-# summary(ddf = "satterthwaite") is a glmmTMB >= 1.1.11 feature and works for
-# the beta family as well as the Gaussian one, which is what allows the
-# small-sample cell to be filled on both scales.
-#
-# The `cond` component is taken explicitly rather than relying on a default:
-# any arm carrying a dispersion or zero-inflation model has coefficients named
-# time* in that component too, and duplicated (model, term) pairs would
-# silently corrupt any BH adjustment applied downstream.
+# summary(ddf = "satterthwaite") is a glmmTMB >= 1.1.13 feature and works for
+# the beta family as well as the Gaussian one (confirmed in the permutation
+# exp.), this allows the small-sample cell to be filled on both models
+# (M and beta)
 #
 # The Satterthwaite computation needs a second differentiation of the
 # likelihood and can fail on a degenerate fit where the plain Wald table is
@@ -274,13 +226,8 @@ summary_fun_wald <- function(m) {
   out
 }
 
-
-# The ML arms: the same function with the Satterthwaite block removed, for the
-# reasons set out in the header. It is written as a truncation of the above
-# rather than as a flag on it, so that the function the REML arms run stays
-# byte-identical to summary_fun_wald in the permutation study -- that identity
-# is what lets the type I error rates measured there be quoted for the tests
-# reported here.
+# The ML arms: the same function with the Satterthwaite block removed, see
+# above. It is written as a truncation of the above summary function.
 #
 # `ddf` and `p_satt` are kept as NA columns rather than dropped, so all four
 # arm files share one schema and bind_rows() over the arms cannot silently
@@ -355,12 +302,16 @@ arms <- list(
 # Satterthwaite is a REML-only reading here, and the arm table is where that
 # could quietly drift. Assert it rather than trusting the list above.
 stopifnot(
-  vapply(arms, function(a) {
-    identical(
-      isTRUE(a$arguments$REML),
-      identical(a$summary_fun, summary_fun_wald)
-    )
-  }, logical(1))
+  vapply(
+    arms,
+    function(a) {
+      identical(
+        isTRUE(a$arguments$REML),
+        identical(a$summary_fun, summary_fun_wald)
+      )
+    },
+    logical(1)
+  )
 )
 
 
@@ -482,9 +433,8 @@ for (arm in arms) {
 
 # Collected timings #########################################################
 #
-# Built from the small sidecars, so this costs nothing even when all four arms
-# are cached. This is the table the computational-time section of the case
-# study reads.
+# This is the table the computational-time section of the case
+# study.
 meta_files <- file.path(
   out_dir,
   sprintf("%s-meta.RDS", vapply(arms, `[[`, character(1), "name"))
