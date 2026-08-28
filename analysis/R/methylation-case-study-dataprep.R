@@ -204,7 +204,34 @@ stopifnot(!anyNA(metadata$time), !anyNA(metadata$participant))
 
 rgset_file <- file.path(der_dir, "seaborne-rgset.RDS")
 meta_file <- file.path(der_dir, "seaborne-metadata.RDS")
-gset_file <- file.path(der_dir, "seaborne-gset-normalized.RDS")
+
+# The normalized gset is NAMED FOR ITS NORMALIZATION, and every script that
+# consumes it names the same file. The previous pipeline wrote functional
+# normalization to `seaborne-gset-normalized.RDS`; that file is still on disk
+# and is what full_v2/ and permutation_v3/ were computed from, so it is left
+# alone rather than overwritten. Results computed under the two normalizations
+# must not be mixed in one table, and a name that says which one produced a
+# file is what makes that visible.
+#
+# WHY QUANTILE. Functional normalization removes between-array LOCATION
+# differences using the control probes but does not force the arrays to a
+# common distribution SHAPE. What is left behind on these arrays is a shift
+# that depends on the methylation level of the site -- low-methylation sites
+# move up and high-methylation sites move down, by up to 0.19 M units between
+# the extreme strata -- which is far larger than the genome-wide mean it
+# averages to. Adaptive shrinkage reads the mean of it as signal: the fitted
+# prior goes one-sided, pi0 collapses below the reporting threshold, and every
+# position is declared. preprocessQuantile() equalises the marginal
+# distributions across arrays by construction, which removes the
+# level-dependence (measured: the between-strata range falls from 0.137--0.188
+# to 0.031--0.045 M units) and reduces the residual SD by about 10%.
+#
+# WHAT IT ASSUMES. It does not test whether a global difference between time
+# points is real; it assumes there is none and enforces that. Any genuine
+# genome-wide change is removed with the artefact and cannot be recovered
+# downstream. That is the trade this pipeline now makes, and it is not
+# decidable from these arrays.
+gset_file <- file.path(der_dir, "seaborne-gset-quantile.RDS")
 
 ## Read the arrays #########################################################
 #
@@ -271,8 +298,39 @@ if (!file.exists(gset_file)) {
   # samples the gset no longer contained.
   metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
 
-  # Functional normalization
-  gset <- minfi::preprocessFunnorm(rgset, ratioConvert = FALSE)
+  # Between-array quantile normalization, see the note at `gset_file` above.
+  #
+  # THE RETURN CLASS IS NOT THE ONE FUNNORM RETURNED, and the difference is a
+  # trap rather than a detail. preprocessFunnorm(ratioConvert = FALSE) returned
+  # a GenomicMethylSet, which still carries the methylated and unmethylated
+  # intensities, so downstream code could ask for
+  #
+  #     getBeta(gset, offset = 100)          # = M / (M + U + 100)
+  #
+  # and the offset kept the beta values off 0 and 1, which is what the beta
+  # family needs. preprocessQuantile() returns a GenomicRatioSet built as
+  # GenomicRatioSet(Beta = NULL, M = log2(M / U)): the intensities are gone,
+  # there is no offset anywhere in it, and getBeta() on such an object derives
+  # beta from M by the inverse logit and SILENTLY IGNORES an `offset` argument.
+  # Downstream code that still passed offset = 100 would therefore keep
+  # running, keep reading as though it were protected, and not be.
+  #
+  # The consumers have been changed to derive beta from M explicitly, and the
+  # check below is what licenses that: the inverse logit lands in the OPEN
+  # interval (0, 1) for every finite M, so the guarantee the offset used to
+  # provide has to come from M being finite, which fixOutliers = TRUE is what
+  # secures. It is asserted rather than assumed.
+  gset <- minfi::preprocessQuantile(
+    rgset,
+    fixOutliers = TRUE,
+    quantileNormalize = TRUE,
+    stratified = TRUE,
+    # The samples are all male and the sex chromosomes are dropped below, so
+    # the sex prediction this would otherwise run has nothing to decide.
+    sex = rep("M", ncol(rgset))
+  )
+
+  stopifnot(is(gset, "GenomicRatioSet"))
 
   # Initial number of probes
   nprobes_init <- dim(gset)[1]
@@ -311,6 +369,37 @@ if (!file.exists(gset_file)) {
 
   ## Clean up memory
   rm(rgset)
+  gc()
+
+  # The check the beta arm depends on, see the normalization note above. M is
+  # what this object stores; beta is the inverse logit of it, which is inside
+  # the open interval (0, 1) for every finite M. A non-finite M would come from
+  # an intensity of exactly zero surviving fixOutliers, and would reach the
+  # beta family as a response of exactly 0 or 1, which it cannot take.
+  #
+  # The observed extremes are reported rather than only tested: how close the
+  # beta values come to the boundary is what decides whether the beta arm needs
+  # a squeeze, and it is a property of the normalization rather than something
+  # that can be assumed from the previous pipeline.
+  m_check <- minfi::getM(gset)
+  beta_check <- 2^m_check / (1 + 2^m_check)
+
+  stopifnot(
+    all(is.finite(m_check)),
+    all(beta_check > 0 & beta_check < 1)
+  )
+
+  cat(sprintf(
+    "M range: %.2f to %.2f | beta range: %.3g to %.6f (distance from 0/1: %.3g, %.3g)\n",
+    min(m_check),
+    max(m_check),
+    min(beta_check),
+    max(beta_check),
+    min(beta_check),
+    1 - max(beta_check)
+  ))
+
+  rm(m_check, beta_check)
   gc()
 
   saveRDS(gset, gset_file)

@@ -21,6 +21,7 @@ LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Imports:
+    ashr,
     broom.mixed,
     clusterProfiler,
     ggupset,
@@ -39,11 +40,15 @@ Imports:
     here,
     jsonlite,
     knitr,
+    IlluminaHumanMethylationEPICanno.ilm10b4.hg19,
+    IlluminaHumanMethylationEPICmanifest,
     lme4,
     lmerSeq,
     lmerTest,
     marginaleffects,
     MASS,
+    maxprobes,
+    minfi,
     org.Hs.eg.db,
     parallel,
     purrr,
@@ -58,6 +63,9 @@ Imports:
     tidyselect,
     tidyverse, 
     usethis
+Remotes:
+    github::markgene/maxprobes,
+    github::trainome/seqwrap
 Suggests:
     devtools,
     git2r,

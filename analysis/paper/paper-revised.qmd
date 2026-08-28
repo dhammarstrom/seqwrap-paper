@@ -356,7 +356,7 @@ $$ {#eq-model-m}
 
 In @eq-model-m, $\mathbf{X}_{i} \boldsymbol{\beta}_c$ expands to an intercept ($\beta_{0c}$) representing the site-specific mean in the reference sampling time-point, and parameters for indicator variables representing follow-up sampling time points ($\beta_{1c}$, 30 min after the first session; $\beta_{2c}$, after the first 7-week loading period; $\beta_{3c}$, after the unloading period, and; $\beta_{4c}$, after the reloading period). A participant- and site-specific intercept ($b_{c,j}$) accounted for the correlation between samples within participants and enabled parameters to be interpreted as within-participant comparisons between the reference and follow-up sampling time-points.
 
-The second model uses the beta regression model proposed by @ferrari2004 as implemented in glmmTMB [@brooks2017a]. 
+The second model uses the beta regression model proposed by @ferrari2004 as implemented in glmmTMB [@brooks2017a] (@eq-model-beta) that uses a logit link to connect the linear predictor to the conditional mean ($\mu_{ci}$, $0 < \mu < 1$) and the precision parameter ($\phi_{c}$, $\phi > 0$) that determines the variance as $\operatorname{Var}(y) = \frac{\mu(1-\mu)}{1+\phi}$ [@ferrari2004].
 
 $$
 \begin{align}
@@ -367,9 +367,7 @@ b_{c,j} &\sim \operatorname{Normal}(0, \sigma_{c[\text{participant}]}) \\
 \end{align}
 $$ {#eq-model-beta}
 
-@eq-model-beta describes the beta model that uses a logit link to connect the linear predictor to the conditional mean ($\mu_{ci}$, $0 < \mu < 1$) and the precision parameter ($\phi_{c}$, $\phi > 0$) that determines the variance as $\operatorname{Var}(y) = \frac{\mu(1-\mu)}{1+\phi}$ [@ferrari2004].
-
-To fit the two models using the seqwrap package we first organize the methylation data matrix so that each row represent a specific CpG site. The first column of the data frame contains CpG site names and the following columns represents samples (`mdata` and `betadata`, respectively in the code example below). The `metadata` is organized to contain the factor variables needed to fit the model (participant and time-point identifications) together with a variable containing the sample name corresponding to the column names of the `data` data frame. Below we first illustrate how `seqwrap_compose` is used to organize the data and fitting arguments into a `swcontainer`. The container object is then used in `seqwrap` which iterate over the rows in the `data`, fits the models and combine the results. Finally, `seqwrap_summarise` is used to sort the results into a two summary tables, representing the results from a summary and an evaluation function, respectively. 
+To fit the two models using the seqwrap package we first organize the methylation data matrix so that each row represent a specific CpG site. The first column of the data frame contains CpG site names and the following columns represents samples (`mdata` and `betadata`, respectively in the code example below). The `metadata` is organized to contain the factor variables needed to fit the model (participant and time-point identifications) together with a variable containing the sample name corresponding to the column names of the `data` data frame. Below we first illustrate how `seqwrap_compose` is used to organize the data and fitting arguments into a `swcontainer`. The container object is then used in `seqwrap` which iterate over the rows in the `data`, fits the models and combine the results. Finally, `seqwrap_summarise` is used to sort the results into a two summary tables, representing the results from a summary and an evaluation function, respectively.
 
 ```{r}
 #| eval: false

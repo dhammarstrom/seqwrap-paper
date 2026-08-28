@@ -61,6 +61,20 @@ data_sim-*/
 /analysis/data/raw_data/
 /analysis/data/derived_data/
 
+# The same results directories, but at the repository root. They belong under
+# analysis/data/derived_data/ and are ignored there by the rule above; a script
+# run with a different working directory writes them here instead, where no
+# rule covered them. That is how 321 MB of shrinkage output reached a commit.
+# The patterns are anchored to the root, so the real directories are unaffected.
+/full_v*/
+/permutation_v*/
+/shrinkage_v*/
+/timing_v*/
+/timing_smoketest/
+/normalization_check/
+/published_anova/
+/temp-make-logs/
+
 # Keep manuscript output
 !analysis/paper/paper.pdf
 !analysis/paper/supplement.pdf

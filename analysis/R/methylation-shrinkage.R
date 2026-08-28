@@ -124,8 +124,25 @@ for (pkg in c("ashr", "etrunct")) {
 
 ## 01. Configuration ########################################################
 
-full_dir <- here::here("analysis/data/derived_data/full_v2")
-out_dir <- here::here("analysis/data/derived_data/shrinkage_v1")
+# full_v3: the two REML arms, fitted on the quantile normalized arrays. The
+# normalization changed because of this script: under functional normalization
+# the arrays carry a level-dependent shift whose mean the prior below reads as
+# signal, which drove pi0 under the reporting threshold and declared every
+# position. full_v2 was the functionally normalized run and its arm files are
+# still on disk; they must not be read here.
+full_dir <- here::here("analysis/data/derived_data/full_v3")
+# shrinkage_v2, because the INPUT changed. A file that already exists is
+# skipped, so pointing full_dir at full_v3 while still writing to shrinkage_v1
+# would skip all eight fits and silently report the functionally normalized
+# results under the new run's name -- the exact failure the versioned
+# directories exist to prevent, and one that leaves no trace in the output.
+#
+#   shrinkage_v1  the two REML arms of full_v2, functionally normalized. pi0
+#                 collapsed to 0.003--0.008 on the two early contrasts and
+#                 every position was declared; that is what motivated the
+#                 change of normalization rather than a result.
+#   shrinkage_v2  the two REML arms of full_v3, quantile normalized.
+out_dir <- here::here("analysis/data/derived_data/shrinkage_v2")
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 stopifnot(dir.exists(full_dir))

@@ -2,17 +2,22 @@
 # downloaded in methylation-case-study-dataprep.R; here we proceed from the
 # normalized gset.
 #
-# The model arms are the SAME four arms as in the permutation study
-# (analysis/R/methylation-error-permutation.R) with the exception that LRT and
-# Satterthwaite in ML are not included in the full run.
-# Type I error rates from the permutation apply to the tests reported here:
+# The model arms are the REML arms of the permutation study
+# (analysis/R/methylation-error-permutation.R). Type I error rates from the
+# permutation apply to the tests reported here:
 #
 # arm         fit                     tests reported
 # ---------   ---------------------   ---------------------------
-# m           gaussian, ML            Wald-z
 # m_reml      gaussian, REML          Wald-z, Wald-Satterthwaite
-# beta        beta_family, ML         Wald-z
 # beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
+#
+# THE ML ARMS ARE NOT FITTED HERE. The permutation study is what compares the
+# estimators, and it found the REML arms to be the calibrated ones; refitting
+# the ML arms over every position would spend 7.2 hours reproducing an
+# estimator this study has already rejected, and the shrinkage step
+# (analysis/R/methylation-shrinkage.R) reads the REML arms only. The comparison
+# lives in the permutation study, where it is answered at a hundredth of the
+# cost.
 #
 # Two things differ from the permutation study by design:
 #
@@ -21,11 +26,11 @@
 # only, so eval_fun does NOT call drop1() and therefore refits nothing.
 # drop1(test = "Chisq") refits the model once which is expensive.
 #
-# - Satterthwaite denominator df are computed on the REML arms ONLY. The
-# permutation study fills all four (estimator x reference).
-# ML+Satterthwaite is removed here for two reasosns, it did not solve the
-# type 1 error rate and pilot run indicated a large time cost.
-# Clean ML is kept for reference.
+# - Every arm here is read with Satterthwaite, because every arm here is REML.
+# The permutation study is what fills the whole estimator x reference grid;
+# ML+Satterthwaite was dropped from it on the grounds that it did not fix the
+# type I error rate and cost a great deal, and plain ML is dropped from this
+# script for the reason given above.
 #
 # Where Satterthwaite IS computed, both reference distributions come out of
 # a single fit, in one pass of summary_fun (see summary_fun_wald below): the
@@ -44,8 +49,12 @@ library(maxprobes) # For filtering cross-reactive probes
 library(seqwrap)
 
 
-# Detect number of cores
+# Detect number of cores. Every seqwrap() call below runs at this width, so
+# the run adapts to whatever machine it is on. detectCores() is documented to
+# return NA on systems it cannot interrogate, which would reach seqwrap() as
+# `cores = NA` rather than as an error, so it is floored here.
 cores <- parallel::detectCores()
+if (is.na(cores) || cores < 1L) cores <- 1L
 
 
 # The results directory is VERSIONED, in the same way and for the same reason
@@ -59,8 +68,17 @@ cores <- parallel::detectCores()
 #                        `p.value` column), eval_fun reporting pdHess. Those
 #                        files are superseded by this directory.
 #   full_v2              four glmmTMB arms (beta, beta_reml, m, m_reml), both
-#                        Wald reference distributions per contrast, no LRT.
-out_dir <- here::here("analysis/data/derived_data/full_v2")
+#                        Wald reference distributions per contrast, no LRT,
+#                        fitted on the FUNCTIONALLY normalized arrays.
+#   full_v3              the two REML arms only, same two Wald readings, on the
+#                        QUANTILE normalized arrays. The normalization changed
+#                        because the level-dependent shift funnorm leaves
+#                        behind made the shrinkage step uninterpretable; see
+#                        the note at `gset_file` in
+#                        analysis/R/methylation-case-study-dataprep.R. Results
+#                        from full_v2 and full_v3 are not comparable position
+#                        by position and must not be pooled.
+out_dir <- here::here("analysis/data/derived_data/full_v3")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 
@@ -74,12 +92,12 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 # Load normalized saved gset ################################################
 
 gset_file <- here::here(
-  "analysis/data/derived_data/seaborne-gset-normalized.RDS"
+  "analysis/data/derived_data/seaborne-gset-quantile.RDS"
 )
 
 if (!file.exists(gset_file)) {
   stop(
-    "seaborne-gset-normalized.RDS is missing. Run ",
+    "seaborne-gset-quantile.RDS is missing. Run ",
     "analysis/R/methylation-case-study-dataprep.R first -- it downloads the ",
     "arrays if needed and writes the normalized, filtered gset.",
     call. = FALSE
@@ -91,19 +109,29 @@ metadata <- readRDS(
   here::here("analysis/data/derived_data/seaborne-metadata.RDS")
 )
 
-# Deriving beta- and m-values ##############################################
+# Deriving M- and beta-values ##############################################
+#
+# M first, beta derived from it -- the reverse of what this script did under
+# functional normalization, and the reversal is required rather than
+# stylistic. preprocessQuantile() returns a GenomicRatioSet that stores
+# M = log2(Meth / Unmeth) and no intensities at all, so the Illumina offset
+# that used to hold beta off 0 and 1, getBeta(gset, offset = 100), has nothing
+# left to act on: getBeta() derives beta from M by the inverse logit and
+# ignores `offset` without complaint. Deriving beta from M explicitly is the
+# same computation with the silence removed. See the normalization note in
+# analysis/R/methylation-case-study-dataprep.R.
+m_vals <- minfi::getM(gset)
+beta_vals <- 2^m_vals / (1 + 2^m_vals)
 
-# Calculate the beta-values with the Illumina-style offset (c = 100)
-beta_vals <- getBeta(gset, offset = 100)
-# Derive M-values from the calculated beta values.
-m_vals <- log2(beta_vals / (1 - beta_vals))
-
-
-# No need to squeeze beta values away from the boundaries. As we use c=100
-# 0 and 1 are not included in the beta values. Otherwise, squeezer:
-# (y(n - 1) + 0.5) / n
-# n_obs     <- ncol(beta_vals)
-# beta_vals <- (beta_vals * (n_obs - 1) + 0.5) / n_obs
+# The inverse logit lands in the OPEN interval for every finite M, so no
+# squeeze is needed. That is a property of the normalization rather than of
+# this script, so it is checked here as well as where the gset is written --
+# a beta of exactly 0 or 1 is a response the beta family cannot take, and it
+# would surface hours into the run rather than now.
+stopifnot(
+  all(is.finite(m_vals)),
+  all(beta_vals > 0 & beta_vals < 1)
+)
 
 # Clean up
 # Remove gset as no longer used
@@ -226,28 +254,6 @@ summary_fun_wald <- function(m) {
   out
 }
 
-# The ML arms: the same function with the Satterthwaite block removed, see
-# above. It is written as a truncation of the above summary function.
-#
-# `ddf` and `p_satt` are kept as NA columns rather than dropped, so all four
-# arm files share one schema and bind_rows() over the arms cannot silently
-# produce a column that is present for some arms and absent for others.
-summary_fun_wald_nosatt <- function(m) {
-  cf <- coef(summary(m))$cond
-
-  data.frame(
-    term = rownames(cf),
-    estimate = cf[, "Estimate"],
-    std.error = cf[, "Std. Error"],
-    p_wald = cf[, "Pr(>|z|)"],
-    ddf = NA_real_,
-    p_satt = NA_real_,
-    row.names = NULL,
-    stringsAsFactors = FALSE
-  )
-}
-
-
 # Model arms ################################################################
 #
 # SCALE (beta vs M) crossed with ESTIMATOR (ML vs REML). The response data
@@ -258,16 +264,6 @@ summary_fun_wald_nosatt <- function(m) {
 # Arm names match the permutation study exactly.
 arms <- list(
   list(
-    name = "beta",
-    scale = "beta",
-    data = betadf,
-    summary_fun = summary_fun_wald_nosatt,
-    arguments = list(
-      formula = y ~ time + (1 | participant),
-      family = glmmTMB::beta_family()
-    )
-  ),
-  list(
     name = "beta_reml",
     scale = "beta",
     data = betadf,
@@ -276,15 +272,6 @@ arms <- list(
       formula = y ~ time + (1 | participant),
       family = glmmTMB::beta_family(),
       REML = TRUE
-    )
-  ),
-  list(
-    name = "m",
-    scale = "M",
-    data = mdf,
-    summary_fun = summary_fun_wald_nosatt,
-    arguments = list(
-      formula = y ~ time + (1 | participant)
     )
   ),
   list(
@@ -299,19 +286,20 @@ arms <- list(
   )
 )
 
-# Satterthwaite is a REML-only reading here, and the arm table is where that
-# could quietly drift. Assert it rather than trusting the list above.
+# Every arm here is REML and every arm is read with Satterthwaite, which is
+# the whole point of dropping the ML arms. The arm table is where that could
+# quietly drift -- a missing REML = TRUE would fit a different estimator under
+# a name that claims otherwise, and the permutation study's error rates would
+# then be quoted for a test that was never run. Assert it rather than trusting
+# the list above.
 stopifnot(
+  vapply(arms, function(a) isTRUE(a$arguments$REML), logical(1)),
   vapply(
     arms,
-    function(a) {
-      identical(
-        isTRUE(a$arguments$REML),
-        identical(a$summary_fun, summary_fun_wald)
-      )
-    },
+    function(a) identical(a$summary_fun, summary_fun_wald),
     logical(1)
-  )
+  ),
+  vapply(arms, function(a) grepl("_reml$", a$name), logical(1))
 )
 
 

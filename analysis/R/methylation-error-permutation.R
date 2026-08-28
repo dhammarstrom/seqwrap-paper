@@ -15,10 +15,13 @@ library(minfi)
 
 
 # Load data ##############################
-# Normalized gset
+# Normalized gset. Quantile normalized, and NAMED for that: the arrays this
+# study is run on have to be the arrays the full run is fitted on, or the type
+# I error rates established here describe a different data set from the one
+# they are quoted for.
 gset <- readRDS(
   here::here(
-    "analysis/data/derived_data/seaborne-gset-normalized.RDS"
+    "analysis/data/derived_data/seaborne-gset-quantile.RDS"
   )
 )
 # Metadata
@@ -27,10 +30,25 @@ metadata <- readRDS(
 )
 
 
-# Calculate the beta-values with the Illumina-style offset (c = 100)
-beta_vals <- getBeta(gset, offset = 100)
-# Derive M-values from the calculated beta values.
-m_vals <- log2(beta_vals / (1 - beta_vals))
+# M- and beta-values, M first and beta derived from it.
+#
+# preprocessQuantile() returns a GenomicRatioSet holding M = log2(Meth/Unmeth)
+# and no intensities, so the Illumina offset this script used to pass,
+# getBeta(gset, offset = 100), has nothing to act on: getBeta() would derive
+# beta from M by the inverse logit and ignore `offset` silently. Deriving beta
+# from M explicitly is the same computation without the false reassurance. See
+# the normalization note in analysis/R/methylation-case-study-dataprep.R.
+m_vals <- minfi::getM(gset)
+beta_vals <- 2^m_vals / (1 + 2^m_vals)
+
+# The spike below shifts M and re-derives beta, and it asserts its own bounds
+# there. This is the check on the UNSPIKED values: the beta family cannot take
+# a response of exactly 0 or 1, and the inverse logit only guarantees the open
+# interval when M is finite.
+stopifnot(
+  all(is.finite(m_vals)),
+  all(beta_vals > 0 & beta_vals < 1)
+)
 
 
 # Simulation settings #####################################
@@ -40,6 +58,9 @@ set.seed(1)
 
 # Set the number of cores to use - default to detect cores
 CORES <- parallel::detectCores()
+# detectCores() returns NA on systems it cannot interrogate; that would reach
+# seqwrap() as `cores = NA` rather than as an error.
+if (is.na(CORES) || CORES < 1L) CORES <- 1L
 
 # Sites sampled per beta-value stratum
 size <- 200
@@ -168,16 +189,28 @@ assign_spike <- function(sub, cells, n_per_cell) {
 # no unidentifiable parameters). The two are reported separately, and only
 # `convergence != 0` and an unusable p-value count as failures.
 #
-# For the omnibus test, drop1(test = "Chisq") gives a chi-square LRT with
-# columns Df / AIC / LRT / Pr(>Chi).
+# THE OMNIBUS LRT IS NOT COMPUTED. Earlier versions of this study called
+# drop1(test = "Chisq") on the ML arms and reported a chi-square likelihood
+# ratio test of the time effect alongside the Wald contrasts. It is dropped
+# for two reasons.
+#
+# The first is that it is not the test anyone reports. A differential
+# methylation analysis reports per-position contrasts against a reference time
+# point; an omnibus test of "the time factor matters somewhere" is not what the
+# literature on these arrays asks of a position, and carrying it here invited
+# the reader to compare a test nobody uses against the tests that are actually
+# calibrated.
+#
+# The second is cost. drop1() refits the model once per target, on top of the
+# fit already made, which is the single most expensive thing this loop did.
+#
+# It is also only ever available on the ML arms: a REML fit has no valid
+# likelihood-ratio test of a fixed effect, because the restricted likelihoods
+# of two different fixed-effect designs are not comparable. So the arm the
+# study concludes with could never have supplied one anyway.
 #
 # `re_sd`, the estimated participant standard deviation, is recorded for every
 # model for potential comparisons between models.
-#
-# Columns are named for what they hold in general (`stat`, `test`) rather than
-# for the chi-square case. Columns are addressed BY NAME: positional indexing
-# is what silently produced NAs when a table turned out to have a different
-# shape and no <none> row.
 eval_fun <- function(m) {
   # Safety stop, the arms below are all glmmTMB fits
   if (!inherits(m, "glmmTMB")) {
@@ -187,27 +220,12 @@ eval_fun <- function(m) {
   # Extract the participant-level SD
   vc <- glmmTMB::VarCorr(m)$cond$participant
 
-  # A REML fit has no valid likelihood-ratio test of a fixed effect: the
-  # restricted likelihoods of two different fixed-effect designs are not
-  # comparable. The omnibus is left empty for the REML arms, which therefore
-  # contribute Wald contrasts only.
-
-  # Check if the fit is REML
-  reml <- isTRUE(m$modelInfo$REML)
-  # Save the drop1 output
-  a <- if (reml) NULL else drop1(m, test = "Chisq")
-
-  # The output data frame
   data.frame(
     convergence = m$fit$convergence,
     singular = !m$sdr$pdHess,
     re_sd = sqrt(as.numeric(vc[1, 1])),
     n = nrow(m$frame),
-    reml = reml,
-    test = if (reml) "none" else "LRT",
-    df = if (reml) NA_real_ else a["time_permute", "Df"],
-    stat = if (reml) NA_real_ else a["time_permute", "LRT"],
-    pval = if (reml) NA_real_ else a["time_permute", "Pr(>Chi)"]
+    reml = isTRUE(m$modelInfo$REML)
   )
 }
 
@@ -274,7 +292,13 @@ summary_fun <- summary_fun_wald
 
 #### Running the permutation loop #############################################
 
-n_perm <- 500 #
+# Iterations. The v3 run completed 486 of a requested 500 at ~7.6 min each.
+# This run is a CONFIRMATION that the calibration established there survives
+# the change of normalization, not a fresh estimate, so it is shortened. The
+# Monte Carlo standard error on a type I error rate grows by sqrt(486 / 200),
+# about 1.6x, which is ample for confirming a rate is unchanged and looser than
+# would be wanted if the permutation were doing primary work.
+n_perm <- 200
 
 # The results directory is VERSIONED, and the loop skips an iteration whose
 # file already exists. Writing a new set of arms into an existing directory
@@ -286,8 +310,15 @@ n_perm <- 500 #
 # permutation_v2: four arms (beta, beta_reml, m, m_reml_satt), where the
 #                    Satterthwaite arm was an lmerTest fit on the M scale only
 # permutation_v3: four glmmTMB arms (beta, beta_reml, m, m_reml) with both
-#                    Wald reference distributions stored per contrast
-out_dir <- here::here("analysis/data/derived_data/permutation_v3")
+#                    Wald reference distributions stored per contrast, plus an
+#                    omnibus LRT on the ML arms, on the FUNCTIONALLY
+#                    normalized arrays
+# permutation_v4: the same four arms and the same two Wald readings, with the
+#                    omnibus LRT removed (see eval_fun) and fitted on the
+#                    QUANTILE normalized arrays. The eval_fun columns `test`,
+#                    `df`, `stat` and `pval` are gone, so v3 and v4 cannot be
+#                    bound together.
+out_dir <- here::here("analysis/data/derived_data/permutation_v4")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Worker start-up cost.
@@ -404,22 +435,20 @@ tryCatch(
       #
       # The design crosses SCALE (beta vs M) with ESTIMATOR (ML vs REML), and
       # each fit is then read with every REFERENCE DISTRIBUTION available to
-      # it. Four fits, all glmmTMB, and ten inferential cells:
+      # it. Four fits, all glmmTMB, and eight inferential cells:
       #
       #   arm         fit                     cells it supplies
       #   ---------   ---------------------   ---------------------------
-      #   m           gaussian, ML            Wald-z, Wald-Satterthwaite,
-      #                                       LRT (omnibus)
+      #   m           gaussian, ML            Wald-z, Wald-Satterthwaite
       #   m_reml      gaussian, REML          Wald-z, Wald-Satterthwaite
-      #   beta        beta_family, ML         Wald-z, Wald-Satterthwaite,
-      #                                       LRT (omnibus)
+      #   beta        beta_family, ML         Wald-z, Wald-Satterthwaite
       #   beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
       #
       # The two Wald cells per arm are two readings of ONE fit and come out of
       # summary_fun together (p_wald, p_satt), so the reference distribution
-      # can be varied with the estimator held fixed, and vice versa. The LRT
-      # is an omnibus test of the whole time factor and has one row per fit,
-      # so it lives in eval_fun; REML supplies no LRT (see eval_fun).
+      # can be varied with the estimator held fixed, and vice versa. The
+      # omnibus LRT that earlier versions read off the ML arms is gone; see
+      # eval_fun for why.
       #
       # This replaces the earlier lmerTest arm. glmmTMB (>= 1.1.13) computes
       # Satterthwaite degrees of freedom itself, for the beta family as well

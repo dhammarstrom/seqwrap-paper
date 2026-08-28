@@ -645,8 +645,8 @@ out <- lapply(fits,temp_summary_fun) |>
 
 
 # Illustrating the 
-es_mmod <- coef(summary(m_mod1))$cond["time_permute3_loading","Estimate"]
-es_betamod<- coef(summary(beta_mod1))$cond["time_permute3_loading","Estimate"]
+es_mmod <- coef(summary(fits[[3]]))$cond["time_permute3_loading","Estimate"]
+es_betamod<- coef(summary(fits[[4]]))$cond["time_permute3_loading","Estimate"]
 
 es_betamod <- es_betamod / log(2)
 ```
@@ -804,6 +804,7 @@ The Satterthwaite approximation failed to produce valid degrees of freedom in so
 ```{r}
 #| echo: false
 #| label: fig-re-sd-failedsatterthwaite
+#| fig-cap: "Differences in the estimated random effect standard deviation between fits with successful vs. unsuccessful Satterthwaite approximation of the denominator degrees of freedom."
 
 
 # How many effects if fail?
@@ -928,6 +929,9 @@ lrt_null <- perm_evals |>
              Type = "LRT") |> 
       dplyr::select(Model, Type, Estimator, pval) 
 
+
+# A histogram option for the p-value distribution
+
 fig2 <- null_dat |>
       filter(convergence == 0) |> 
       dplyr::select(model, iter, betacat, delta, 
@@ -947,9 +951,16 @@ fig2 <- null_dat |>
       geom_histogram(aes(y = after_stat(density)),
                      boundary = 0) + 
       facet_wrap(Model ~ Estimator + Type, labeller = label_both)  + 
-      theme(strip.text = ggtext::element_markdown()) + 
+
       labs(x = "p-value", 
-           y = "Density")
+           y = "Density") + 
+      theme_classic() + 
+            theme(strip.text = ggtext::element_markdown()) 
+
+
+
+
+
 
  
 # Extraction of error rates are aggregated over several steps
@@ -1093,20 +1104,691 @@ fig <- cowplot::plot_grid(fig2,
 
 ### Determining the power
 
+When evaluating the empirical power we must take the type I error rate into account as a higher type I error rate also spills over into increased power [@lloyd2005]. As the type 1 error rates differs between inferential procedures (@fig-permutation-type1), we will compare power the same size [@lloyd2005]. From each p-value procedure among the null effects a critical value is calculated as $\hat{c}$ which is the &alpha;-quantile of the null distribution of p-values. Power is then determined as the proportion of true non-null effects with $p \le \hat{c}$. We will use only the contrast used for the added effect (`time_permute3_loading`) to build the null distribution of p-values and we set the &alpha; level to 0.05. 
 
-
+The actual size varies between the &beta;-value strata (proportion of type I errors in @fig-permutation-type1), so the calibration can be made at two levels. A single critical value per cell answers what happens when a procedure is run at one threshold calibrated to 5% overall, which is the realistic situation. A critical value per cell and stratum answers which procedure detects more *at equal size within a stratum*, and is the comparison that is not confounded by the stratum-wise differences in calibration. Both are computed below; the stratum-resolved figure uses the second.
 
 ```{r}
+#| label: power-setup
+#| eval: true
 
-perm_summaries |> 
-       dplyr::inner_join(perm_designs,
-                        by = c("iter", "target" = "id")) |> 
-      filter(term == "time_permute3_loading", 
-             delta != 0) |> 
-      ggplot(aes())
+# The nominal level.
+alpha <- 0.05
 
+# Monte Carlo critical value.
+#
+# The functions first sorts the p-values and then 
+# sets then uses the alpha * length(p) as the critical value.
+crit_value <- function(p, alpha) {
+      p <- sort(p[!is.na(p)])
+      k <- floor(alpha * length(p))
+      # Too few draws to place a rejection region at this level: reject nothing.
+      if (k < 1) return(0)
+      p[k]
+}
+
+# One row per (model, test type, iteration, site). We use the wald-type 
+# contrasts and the data from the LRT test (ML only).
+#
+# `is_alt` is ground truth. These are the sites with added effect. 
+power_dat <- dplyr::bind_rows(
+
+      perm_dat |>
+            dplyr::filter(convergence == 0, term %in% alt_terms) |>
+            dplyr::select(model, iter, target, betacat, delta, delta_abs,
+                          estimate, p_wald, p_satt) |>
+            tidyr::pivot_longer(cols = c(p_wald, p_satt),
+                                names_to = "type",
+                                values_to = "pval"),
+
+      perm_evals |>
+            dplyr::filter(convergence == 0) |>
+            # The REML arms carry no LRT (see eval_fun in the permutation
+            # script), and arrive here as NA rather than as absent rows.
+            dplyr::filter(!is.na(pval)) |>
+            dplyr::inner_join(perm_designs,
+                              by = c("iter", "target" = "id")) |>
+            dplyr::mutate(type = "LRT", estimate = NA_real_) |>
+            dplyr::select(model, iter, target, betacat, delta, delta_abs,
+                          estimate, type, pval)) |>
+
+      # Applied to nulls and alternatives together: dropping the Satterthwaite
+      # failures from one side only would change which sites a cell is scored
+      # on. The retained counts are reported per cell in @tbl-power-calibration.
+      dplyr::filter(!is.na(pval)) |>
+      dplyr::mutate(is_alt = delta != 0,
+                    sgn = sign(delta),
+                    model = factor(model),
+                    type = factor(type, levels = c("p_wald", "p_satt", "LRT")))
+
+stopifnot(any(power_dat$is_alt), any(!power_dat$is_alt))
 
 ```
+
+```{r}
+#| label: power-critical-values
+#| eval: true
+
+# Calibration, pooled over strata.
+crit_global <- power_dat |>
+      dplyr::filter(!is_alt) |>
+      dplyr::summarise(.by = c(model, type),
+                       n_null = dplyr::n(),
+                       # Actual size at the nominal cut-off.
+                       size_nominal = mean(pval <= alpha),
+                       c_hat = crit_value(pval, alpha),
+                       # By construction this should sit at alpha. It is kept
+                       # as a check on the rejection region, not as a result.
+                       size_adjusted = mean(pval <= c_hat))
+
+# Calibration within stratum.
+crit_strata <- power_dat |>
+      dplyr::filter(!is_alt) |>
+      dplyr::summarise(.by = c(model, type, betacat),
+                       n_null = dplyr::n(),
+                       size_nominal = mean(pval <= alpha),
+                       c_hat = crit_value(pval, alpha),
+                       size_adjusted = mean(pval <= c_hat))
+
+# The rejection region must be conservative in every cell.
+stopifnot(all(crit_global$size_adjusted <= alpha + 1e-6),
+          all(crit_strata$size_adjusted <= alpha + 1e-6))
+
+```
+
+Power is estimated per iteration and then averaged over iterations with the permutation as the resampling unit. The Monte Carlo (permutation iteration) standard error is taken across the `r n_perm` iterations. The effect grid is balanced by construction (five sites per &delta; &times; sign cell within every stratum), but convergence failures can unbalance it, so pooled figures are averages of cell means rather than raw proportions.
+
+```{r}
+#| label: power-estimation
+#| eval: true
+
+# Per-iteration power in the finest cell of the design: model, test type,
+# stratum, effect magnitude and direction. Three calibrations are carried side
+# by side so that the effect of the adjustment is readable.
+power_cell <- power_dat |>
+      dplyr::filter(is_alt) |>
+      dplyr::inner_join(crit_global |> dplyr::select(model, type,
+                                                     c_global = c_hat),
+                        by = c("model", "type")) |>
+      dplyr::inner_join(crit_strata |> dplyr::select(model, type, betacat,
+                                                     c_stratum = c_hat),
+                        by = c("model", "type", "betacat")) |>
+      dplyr::summarise(.by = c(model, type, betacat, delta_abs, sgn, iter),
+                       n_sites = dplyr::n(),
+                       pow_nominal = mean(pval <= alpha),
+                       pow_adj_global = mean(pval <= c_global),
+                       pow_adj_stratum = mean(pval <= c_stratum))
+
+# Aggregate power_cell to a requested grouping. The mean is taken over the
+# finer cells within an iteration first, so that an unbalanced cell (caused by
+# a convergence failure) does not weight the pooled estimate.
+power_agg <- function(dat, by = character()) {
+
+      dat |>
+            dplyr::summarise(
+                  .by = dplyr::all_of(c("model", "type", "iter", by)),
+                  dplyr::across(dplyr::starts_with("pow_"), mean)) |>
+            tidyr::pivot_longer(cols = dplyr::starts_with("pow_"),
+                                names_to = "calibration",
+                                values_to = "power") |>
+            dplyr::summarise(
+                  .by = dplyr::all_of(c("model", "type", "calibration", by)),
+                  m.power = mean(power),
+                  s.power = stats::sd(power),
+                  n_iter = dplyr::n(),
+                  mcse = s.power / sqrt(n_iter)) |>
+            dplyr::mutate(lo = m.power - 1.96 * mcse,
+                          hi = m.power + 1.96 * mcse)
+}
+
+power_overall  <- power_agg(power_cell)
+power_delta    <- power_agg(power_cell, by = c("delta_abs"))
+power_strata   <- power_agg(power_cell, by = c("betacat", "delta_abs"))
+power_sign     <- power_agg(power_cell, by = c("betacat", "delta_abs", "sgn"))
+
+```
+
+```{r}
+#| label: power-labels
+#| eval: true
+
+# Labels shared by the table and the figures below, matching those used for
+# the type I error rate.
+lab_model <- function(x) {
+      dplyr::recode(as.character(x),
+                    beta      = "&beta;<sub>ML</sub>",
+                    beta_reml = "&beta;<sub>REML</sub>",
+                    m         = "M<sub>ML</sub>",
+                    m_reml    = "M<sub>REML</sub>")
+}
+
+lab_type <- function(x) {
+      factor(dplyr::recode(as.character(x),
+                           p_wald = "Wald p-values",
+                           p_satt = "Satterthwaite DDF",
+                           LRT    = "Omnibus LRT"),
+             levels = c("Wald p-values", "Satterthwaite DDF", "Omnibus LRT"))
+}
+
+lab_betacat <- function(x) {
+      factor(dplyr::case_when(x == "xlow"  ~ "0 - 0.2",
+                              x == "low"   ~ "0.2 - 0.4",
+                              x == "mid"   ~ "0.4 - 0.6",
+                              x == "high"  ~ "0.6 - 0.8",
+                              x == "xhigh" ~ "0.8 - 1"),
+             levels = c("0 - 0.2", "0.2 - 0.4", "0.4 - 0.6",
+                        "0.6 - 0.8", "0.8 - 1"))
+}
+
+lab_sign <- function(x) {
+      factor(dplyr::if_else(x > 0, "&delta; > 0", "&delta; < 0"),
+             levels = c("&delta; > 0", "&delta; < 0"))
+}
+
+# The effect magnitudes actually present, used as axis breaks.
+deltas <- sort(unique(power_cell$delta_abs))
+
+```
+
+```{r}
+#| label: tbl-power-calibration
+#| eval: true
+#| echo: false
+
+power_overall |>
+      dplyr::select(model, type, calibration, m.power) |>
+      tidyr::pivot_wider(names_from = calibration, values_from = m.power) |>
+      dplyr::inner_join(crit_global, by = c("model", "type")) |>
+      dplyr::inner_join(power_dat |>
+                              dplyr::filter(is_alt) |>
+                              dplyr::summarise(.by = c(model, type),
+                                               n_alt = dplyr::n()),
+                        by = c("model", "type")) |>
+      dplyr::mutate(estimator = dplyr::if_else(grepl("_reml", model),
+                                               "REML", "ML"),
+                    model = lab_model(model),
+                    type = lab_type(type)) |>
+      dplyr::arrange(type, model) |>
+      dplyr::select(model, estimator, type, n_null, n_alt, size_nominal,
+                    c_hat, size_adjusted, pow_nominal, pow_adj_global) |>
+      gt() |>
+      fmt_number(columns = c(size_nominal, size_adjusted,
+                             pow_nominal),
+                 decimals = 3) |>
+            fmt_number(columns = c(pow_adj_global),
+                 decimals = 4) |>
+      fmt_number(columns = c_hat, decimals = 3) |>
+      fmt_number(columns = c(n_null, n_alt), use_seps = TRUE, decimals = 0) |>
+      gt::cols_label(model = "Model",
+                     estimator = "Estimator",
+                     type = "Test",
+                     n_null = md("Null<br>p-values"),
+                     n_alt = md("Spiked<br>p-values"),
+                     size_nominal = md("Size at<br>&alpha; = 0.05"),
+                     c_hat = md("Critical<br>value"),
+                     size_adjusted = md("Size at<br>critical value"),
+                     pow_nominal = md("Power at<br>&alpha; = 0.05"),
+                     pow_adj_global = md("Size-adjusted<br>power")) |>
+      fmt_markdown(columns = "model")
+
+```
+
+@tbl-power-calibration shows the critical value ($\hat{c}$) of every inferential procedure, aggregated over &beta; categories, together with power before and after the adjustment. Power depends on the effect magnitude and is shown in the figure below (@fig-permutation-power).
+
+```{r}
+#| label: fig-permutation-power
+#| eval: true
+#| echo: false
+#| fig-width: 10
+#| fig-height: 11
+#| fig-cap: "Size-adjusted power [@lloyd2005] against the magnitude of the signed added effect within each &beta;-strata (A). Each inferential cell is calibrated against its own permutation null so that all procedures operate at an actual size of 5%. (B) Power within &beta;-value strata, with the critical value determined within stratum. (C) Power pooled over strata, comparing the nominal cut-off (dashed) with the size-adjusted cut-off (solid) determined from the pooled null. Error bars are 95% Monte Carlo intervals over permutations."
+
+
+figA <- power_sign |>
+      dplyr::filter(calibration == "pow_adj_stratum") |>
+      dplyr::mutate(Model = lab_model(model),
+                    type = lab_type(type),
+                    betacat = lab_betacat(betacat)) |>
+      
+      filter(type == "Satterthwaite DDF") |> 
+ 
+      ggplot(aes(delta_abs * sgn, 100 * m.power,
+                 fill = Model, 
+                 shape = Model, 
+                 group = Model)) +
+      geom_line(alpha = 0.4) +
+      geom_point(size = 2, alpha = 0.4) +
+      ggh4x::facet_grid2( ~ betacat, strip = strip) +
+      theme_classic() +
+      theme(legend.position = "bottom",
+            legend.title = element_blank(),
+            legend.text = ggtext::element_markdown(),
+            axis.title.x = ggtext::element_markdown()) +
+      scale_colour_manual(values = colors) +
+      scale_shape_manual(values = c(21, 24, 23, 22)) +
+      scale_x_continuous(breaks = c(-0.8, -0.4, -0.2, -0.1, 
+                                    0.1, 0.2, 0.4, 0.8), 
+                         labels = c(-0.8, -0.4, "", "", "", "", 0.4, 0.8)) +
+      scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+      labs(x = "Added effect (&delta;, M-value units)",
+           y = "Size-adjusted power (%)")
+
+
+
+
+
+figB <- power_strata |>
+      dplyr::filter(calibration == "pow_adj_stratum") |>
+      dplyr::mutate(Model = lab_model(model),
+                    type = lab_type(type),
+                    betacat = lab_betacat(betacat)) |>
+
+      ggplot(aes(delta_abs, 100 * m.power,
+                 colour = Model, shape = Model, group = Model)) +
+      geom_line() +
+      geom_errorbar(aes(ymin = 100 * lo, ymax = 100 * hi), width = 0.03) +
+      geom_point(size = 2) +
+      ggh4x::facet_grid2(type ~ betacat, strip = strip) +
+      theme_classic() +
+      theme(legend.position = "bottom",
+            legend.title = element_blank(),
+            legend.text = ggtext::element_markdown(),
+            axis.title.x = ggtext::element_markdown()) +
+      scale_colour_manual(values = colors) +
+      scale_shape_manual(values = c(21, 24, 23, 22)) +
+      scale_x_continuous(breaks = deltas) +
+      scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+      labs(x = "Added effect (|&delta;|, M-value units)",
+           y = "Size-adjusted power (%)")
+
+figC <- power_delta |>
+      dplyr::filter(calibration %in% c("pow_nominal", "pow_adj_global")) |>
+      dplyr::mutate(Model = lab_model(model),
+                    type = lab_type(type),
+                    Calibration = factor(
+                          dplyr::recode(calibration,
+                                        pow_nominal    = "Nominal &alpha; = 0.05",
+                                        pow_adj_global = "Size-adjusted"),
+                          levels = c("Nominal &alpha; = 0.05",
+                                     "Size-adjusted"))) |>
+
+      ggplot(aes(delta_abs, 100 * m.power,
+                 colour = Model, linetype = Calibration,
+                 group = interaction(Model, Calibration))) +
+      geom_line() +
+      geom_point(aes(shape = Model), size = 2) +
+      facet_wrap(~ type, ncol = 3) +
+      theme_classic() +
+      theme(legend.position = "bottom",
+            legend.title = element_blank(),
+            legend.text = ggtext::element_markdown(),
+            axis.title.x = ggtext::element_markdown()) +
+      scale_colour_manual(values = colors) +
+      scale_shape_manual(values = c(21, 24, 23, 22)) +
+      scale_linetype_manual(values = c(2, 1)) +
+      scale_x_continuous(breaks = deltas) +
+      scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+      guides(colour = "none", shape = "none") +
+      labs(x = "Added effect (|&delta;|, M-value units)",
+           y = "Power (%)")
+
+fig_power <- cowplot::plot_grid(figA, figB,figC,
+                                ncol = 1,
+                                rel_heights = c(1, 0.7),
+                                labels = c("A", "B"))
+
+fig_power
+
+```
+
+The two directions of the added effect are in theory not equally detectable at the extremes of the &beta;-value distribution. At a site with a &beta; value close to 0 or 1, an effect that moves the mean towards the boundary is compressed, whereas an effect of the same magnitude on the M scale that moves the mean towards 0.5 is not. Only small differences were seen between models across &beta; strata (@fig-permutation-power)  
+
+A rejection in the wrong direction is not a detection. Since the sign of the added effect is known, the proportion of rejections (p < 0.05) whose estimate carries the opposite sign can be determined directly. The estimate of the &beta; model is on the logit scale, which preserves the sign, so the two model types are comparable. @tbl-power-sign-discordance summarizes the discordant effects across the the REML models with the Satterthwaite DDF correction. The model type do not to any meaningful degree differ in the sign error. When effects are larger, discordant effects are expected to a lesser degree [@gelman2014].
+
+```{r}
+#| label: tbl-power-sign-discordance
+#| eval: true
+
+# Sign-discordant rejections (type S, @gelman2014) among the size-adjusted
+# rejections. The omnibus LRT is excluded: it has no signed estimate.
+#
+# Rates are formed from POOLED counts rather than as the mean of per-iteration
+# rates. A cell with no rejections in a given permutation has no rate to
+# average, so averaging silently drops that permutation and weights the result
+# towards the permutations that rejected most.
+sign_rejections <- power_dat |>
+      dplyr::filter(is_alt, type != "LRT") |>
+
+      dplyr::filter(pval < 0.05) |>
+      dplyr::mutate(discordant = sign(estimate) != sgn)
+
+# Full-resolution breakdown, kept for inspection. Note that the cells of this
+# table are thin: at the resolution of model x test x stratum x effect x sign
+# the discordant counts are single digits, which is why nothing below is
+# reported at that resolution.
+sign_discordance <- sign_rejections |>
+      dplyr::summarise(.by = c(model, type, betacat, delta_abs, sgn),
+                       n_rejected = dplyr::n(),
+                       n_discordant = sum(discordant),
+                       prop_discordant = n_discordant / n_rejected)
+
+
+
+# (i) The resolved result: type S risk against the magnitude of the effect,
+# for each model arm. The Satterthwaite cell is used throughout, matching the
+# threshold that the power figures are built on.
+sign_rejections |>
+      dplyr::filter(type == "p_satt") |>
+      dplyr::summarise(.by = c(model, delta),
+                       n_rejected = dplyr::n(),
+                       n_discordant = sum(discordant),
+                       prop_discordant = n_discordant / n_rejected) |> 
+      filter(model %in% c("beta_reml", "m_reml")) |> 
+      pivot_wider(names_from = model, 
+                  values_from = c(n_rejected, n_discordant, prop_discordant)) |> 
+      arrange(delta) |> 
+      dplyr::select(delta, 
+                    n_rejected_beta_reml, n_discordant_beta_reml, prop_discordant_beta_reml, 
+                    n_rejected_m_reml, n_discordant_m_reml, prop_discordant_m_reml) |> 
+      gt()  |> 
+      tab_spanner(label = md("&beta;<sub>REML</sub>"), 
+                  columns = c(n_rejected_beta_reml, n_discordant_beta_reml, prop_discordant_beta_reml)) |> 
+      tab_spanner(label = md("M<sub>REML</sub>"), 
+                  columns = c(n_rejected_m_reml, n_discordant_m_reml, prop_discordant_m_reml)) |> 
+           fmt_number(columns = c(prop_discordant_beta_reml, 
+                                  prop_discordant_m_reml), 
+                      decimals = 4) |> 
+      cols_label(delta = md("&delta;"), 
+                 n_rejected_beta_reml = "N rejected",
+                 n_discordant_beta_reml = "N discordant", 
+                 prop_discordant_beta_reml = md("Proportion<br>discordant"), 
+                    n_rejected_m_reml = "N rejected", 
+                 n_discordant_m_reml = "N discordant", 
+                 prop_discordant_m_reml= md("Proportion<br>discordant")) |> 
+      fmt_number()
+      
+```
+
+
+The power analysis indicates that the inferential procedures do not differ in the effects that they detect once size is accounted for. What is left to separate them is the machinery of the test itself: the standard error that the fit reports and the reference distribution that the standard error is judged against. A rejection at the nominal level occurs when $|\hat\delta| > c \times \widehat{\text{SE}}$, with $c = 1.96$ for the Wald test and $c = t_{0.975, \nu}$ for the Satterthwaite test at the approximated denominator degrees of freedom &nu;. The estimate is very nearly common to the four procedures: the two tests within an arm are two readings of one fit and share it exactly, the M arm is unchanged by the switch from ML to REML, which cannot move the fixed effects of a Gaussian mixed model, and the two &beta; arms agree to within `r sprintf("%.3f", reml_shift$beta_vs_beta_reml)` M units at the worst site of the whole experiment. The product $c \times \widehat{\text{SE}}$ — the half-width of the rejection region — is then very nearly the *only* quantity in which they can differ, and it is the quantity that has to account for the differences in type I error rate seen in @fig-permutation-type1.
+
+```{r}
+#| label: se-setup
+#| eval: true
+
+# Standard errors on a common scale, on the true nulls only. The null cells
+# are the ones the type I error rates are read from, and the standard error
+# is a property of the fit rather than of the reference distribution, so a
+# single value per (arm, iteration, site) carries both tests.
+#
+# The beta arm reports on the logit scale, where a shift of delta M units is
+# a shift of delta*log(2); dividing by log(2) puts both arms in M units. This
+# is the same conversion used in @tbl-model-comp-illustration and in the bias
+# section below.
+# The two tests within an arm are two readings of one fit, so they share the
+# estimate exactly. Across estimators the agreement has to be checked rather
+# than assumed: REML cannot change the fixed effects of a Gaussian mixed model
+# at all, but it can change them for the beta GLMM, whose restricted
+# likelihood is not the same object. Both are checked together, since
+# agreement on the Gaussian side is what shows that the arms are being read
+# correctly.
+reml_shift <- perm_dat |>
+      dplyr::filter(convergence == 0, term %in% alt_terms) |>
+      dplyr::select(model, iter, target, estimate) |>
+      tidyr::pivot_wider(names_from = model, values_from = estimate) |>
+      dplyr::summarise(
+            m_vs_m_reml       = max(abs(m - m_reml), na.rm = TRUE),
+            beta_vs_beta_reml = max(abs(beta - beta_reml), na.rm = TRUE))
+
+stopifnot(reml_shift$m_vs_m_reml < 1e-3)
+
+se_dat <- perm_dat |>
+      dplyr::filter(convergence == 0, term %in% alt_terms, delta == 0) |>
+      dplyr::mutate(
+            divisor = dplyr::if_else(grepl("^beta", model), log(2), 1),
+            se_M    = std.error / divisor,
+            # Satterthwaite can return a degenerate denominator degrees of
+            # freedom on a fit whose participant variance sits on the zero
+            # boundary (@fig-re-sd-failedsatterthwaite). The inner replacement
+            # keeps qt() off those values rather than letting it warn.
+            ddf_ok  = !is.na(ddf) & ddf > 0,
+            # The multiplier that each test applies to the standard error.
+            p_wald  = stats::qnorm(0.975),
+            p_satt  = dplyr::if_else(
+                  ddf_ok,
+                  stats::qt(0.975, dplyr::if_else(ddf_ok, ddf, 1)),
+                  NA_real_)) |>
+      dplyr::select(model, iter, target, betacat, se_M, ddf, p_wald, p_satt) |>
+      tidyr::pivot_longer(cols = c(p_wald, p_satt),
+                          names_to = "type",
+                          values_to = "crit") |>
+      dplyr::mutate(type = factor(type, levels = c("p_wald", "p_satt")),
+                    # The half-width of the rejection region in M units.
+                    halfwidth = crit * se_M)
+
+# The permutation is the resampling unit, as it is everywhere else: a site
+# level summary is formed within an iteration first and the iterations are
+# then averaged. The within-iteration summary is a median because the
+# standard error of the beta arm is right skewed in the extreme strata, where
+# a few sites with near-boundary fitted means dominate a mean.
+se_stratum <- se_dat |>
+      dplyr::filter(type == "p_wald") |>
+      dplyr::summarise(.by = c(model, betacat, iter),
+                       med_se = stats::median(se_M, na.rm = TRUE)) |>
+      dplyr::summarise(.by = c(model, betacat),
+                       m.se = mean(med_se),
+                       mcse = stats::sd(med_se) / sqrt(dplyr::n()))
+
+# The four arms are fitted to the same site in the same iteration, so the
+# half-widths can be compared within a site rather than between marginal
+# distributions. Everything is expressed relative to the M model fitted by
+# REML and tested against the Satterthwaite reference, i.e. the procedure
+# that held the nominal level in @fig-permutation-type1.
+hw_ref <- se_dat |>
+      dplyr::filter(model == "m_reml", type == "p_satt") |>
+      dplyr::select(iter, target, betacat, hw_ref = halfwidth)
+
+hw_ratio <- se_dat |>
+      dplyr::inner_join(hw_ref, by = c("iter", "target", "betacat")) |>
+      dplyr::filter(!is.na(halfwidth), !is.na(hw_ref)) |>
+      dplyr::mutate(ratio = halfwidth / hw_ref) |>
+      dplyr::summarise(.by = c(model, type, betacat, iter),
+                       med_ratio = stats::median(ratio, na.rm = TRUE)) |>
+      dplyr::summarise(.by = c(model, type, betacat),
+                       m.ratio = mean(med_ratio),
+                       mcse = stats::sd(med_ratio) / sqrt(dplyr::n()))
+
+# The Satterthwaite multiplier on its own: how much of the widening in panel B
+# is bought by the reference distribution rather than by the estimator.
+satt_mult <- se_dat |>
+      dplyr::filter(type == "p_satt", !is.na(crit)) |>
+      dplyr::summarise(.by = c(model, betacat, iter),
+                       med_crit = stats::median(crit),
+                       med_ddf  = stats::median(ddf, na.rm = TRUE)) |>
+      dplyr::summarise(.by = c(model, betacat),
+                       m.crit = mean(med_crit),
+                       m.ddf  = mean(med_ddf))
+
+# The two steps, as percentages, for the text. The estimator step is the REML
+# standard error against its ML counterpart within a stratum; the reference
+# step is the Satterthwaite multiplier against the normal quantile it
+# replaces. Both are summarised across strata as a range, since neither turns
+# out to depend on the stratum.
+pct <- function(x) sprintf("%.1f", 100 * (x - 1))
+
+se_step <- se_stratum |>
+      dplyr::mutate(estimator = dplyr::if_else(grepl("_reml", model),
+                                               "reml", "ml"),
+                    family = dplyr::if_else(grepl("^beta", model),
+                                            "beta", "m")) |>
+      dplyr::select(family, estimator, betacat, m.se) |>
+      tidyr::pivot_wider(names_from = estimator, values_from = m.se) |>
+      dplyr::mutate(ratio = reml / ml)
+
+crit_step <- satt_mult |>
+      dplyr::filter(grepl("_reml", model)) |>
+      dplyr::mutate(ratio = m.crit / stats::qnorm(0.975))
+
+```
+
+```{r}
+#| label: fig-permutation-se
+#| eval: true
+#| echo: false
+#| fig-height: 7
+#| fig-cap: "Standard errors and rejection regions across &beta;-value strata under the null. (A) Median standard error of the spiked contrast in M-value units. (B) Half-width of the rejection region, c &times; SE, for each test, formed per site and expressed relative to the M<sub>REML</sub> model tested against the Satterthwaite reference (dashed line at 100%). Points are means over permutations of the within-permutation median, error bars are &plusmn;1.96 Monte Carlo standard errors."
+
+figA <- se_stratum |>
+      dplyr::mutate(model = lab_model(model),
+                    betacat = lab_betacat(betacat)) |>
+
+      ggplot(aes(model, m.se)) +
+      geom_errorbar(aes(ymin = m.se - 1.96 * mcse,
+                        ymax = m.se + 1.96 * mcse),
+                    width = 0.5) +
+      geom_point(size = 3, shape = 21, fill = "white") +
+      ggh4x::facet_wrap2(~ betacat, ncol = 5, strip = strip) +
+      theme_classic() +
+      theme(axis.title.x = ggtext::element_markdown(),
+            axis.text.x = ggtext::element_markdown(angle = 45, hjust = 1),
+            axis.title.y = ggtext::element_markdown()) +
+      labs(x = NULL,
+           y = "Standard error<br>(M-value units)")
+
+figB <- hw_ratio |>
+      dplyr::mutate(model = lab_model(model),
+                    betacat = lab_betacat(betacat),
+                    type = lab_type(type)) |>
+
+      ggplot(aes(model, 100 * m.ratio, shape = type, fill = type)) +
+      geom_hline(yintercept = 100, lty = 2, colour = "gray") +
+      geom_errorbar(aes(ymin = 100 * (m.ratio - 1.96 * mcse),
+                        ymax = 100 * (m.ratio + 1.96 * mcse)),
+                    width = 0.5,
+                    position = position_dodge(width = 0.3)) +
+      geom_point(size = 3, position = position_dodge(width = 0.3)) +
+      ggh4x::facet_wrap2(~ betacat, ncol = 5, strip = strip) +
+      theme_classic() +
+      theme(axis.title.x = ggtext::element_markdown(),
+            axis.text.x = ggtext::element_markdown(angle = 45, hjust = 1),
+            axis.title.y = ggtext::element_markdown(),
+            legend.position = "bottom",
+            legend.title = element_blank()) +
+      scale_shape_manual(values = c(21, 24)) +
+      scale_fill_manual(values = colors) +
+      labs(x = "Model",
+           y = "Rejection region half-width<br>(% of M<sub>REML</sub>, Satterthwaite DDF)")
+
+fig_se <- cowplot::plot_grid(figA, figB,
+                             ncol = 1,
+                             rel_heights = c(1, 1.2),
+                             labels = c("A", "B"))
+
+fig_se
+
+```
+
+@fig-permutation-se separates the two mechanisms. Panel A shows that the standard error depends on the estimator rather than on the model type: the ML fits report a smaller standard error than their REML counterparts in every stratum, by `r pct(min(se_step$ratio))` to `r pct(max(se_step$ratio))`%, which is the expected consequence of estimating the variance components without accounting for the estimation of the fixed effects. The stratum, by contrast, moves both arms together, and the &beta; and M arms differ from each other by little. Panel B combines that standard error with the multiplier the test applies to it. A Wald test on an ML fit gives the narrowest rejection region of the four procedures and therefore rejects most often; replacing ML by REML widens it by the amount above, and replacing the normal quantile by the Satterthwaite one adds a further `r pct(min(crit_step$ratio))` to `r pct(max(crit_step$ratio))`% at a median of about `r sprintf('%.0f', mean(crit_step$m.ddf))` denominator degrees of freedom. The two steps are close to independent of the &beta; stratum and of the model type, and together they take the ML Wald procedure to the one that held the nominal level in @fig-permutation-type1.
+
+This is the whole of the difference between the procedures. The estimates are all but shared, the size-adjusted power is shared, and what remains is a rejection region that four procedures draw at four slightly different widths. The type I error rates of @fig-permutation-type1 are the direct consequence: a procedure that draws its rejection region a few percent too narrow rejects a few percent too often under the null, and buys nothing for it under the alternative.
+
+
+
+
+
+
+
+### Exaggeration of the reported effect
+
+The sections above concern what the procedures *decide*. This one concerns what gets *reported* once a decision has been made. A site is declared differentially methylated only when its estimate is large enough to clear the threshold, so the estimates that are reported are a selected subset of the estimates that were made, and their average magnitude exceeds the effect that generated them. This is the type M error of @gelman2014, the companion of the sign error in @tbl-power-sign-discordance, and it is a property of thresholded reporting rather than of either model.
+
+No comparison of the two models against the added effect is attempted here, because this experiment cannot support one. The effect is added to the observed M values, $m' = m + \delta x$, and $x$ is exactly the column of the design matrix that the contrast is read from. The variance components of the Gaussian arm are estimated from residual contrasts orthogonal to that column space and are therefore identical for $m$ and $m'$, which makes the fixed effect satisfy $\hat\delta(m + \delta x) = \hat\delta(m) + \delta$ as an algebraic identity rather than as an estimate — it returns the added effect exactly, on any data, for any &delta;. The &beta; arm has no such identity, since its response, $\text{plogis}(m'\log 2)$, is a nonlinear transform of the spiked values rather than a shift of them. Any difference between the arms measured against &delta; is that asymmetry and not a property of the estimators, so the exaggeration below is read within an arm rather than between them.
+
+The two arms still have to be put on a common scale to appear in the same figure. Because $\text{logit}(\beta) = M \times \log(2)$, a shift of &delta; M units is a shift of $\delta \log(2)$ in the linear predictor of the &beta; model, so dividing the &beta;-model estimate by $\log(2)$ puts both arms in M units. This is the same conversion used for the single site in @tbl-model-comp-illustration. Only the REML arms are carried forward, since the estimate and not the test is what is at issue.
+
+```{r}
+#| label: bias-type-m
+#| eval: true
+
+# One row per (arm, iteration, site) on the spiked contrast, both arms in M
+# units. The estimates do not depend on the reference distribution, so this
+# works from perm_dat directly rather than from the pivoted power_dat.
+est_dat <- perm_dat |>
+      dplyr::filter(convergence == 0, term %in% alt_terms,
+                    model %in% c("beta_reml", "m_reml")) |>
+      dplyr::mutate(est_M = dplyr::if_else(grepl("^beta", model),
+                                           estimate / log(2), estimate))
+
+# Exaggeration ratio: the mean magnitude of the estimates that survive the
+# size-adjusted threshold, relative to the effect that generated them. The
+# Satterthwaite cell is used, and the threshold is the one calibrated within
+# stratum, so this is conditioned on exactly the rejections counted in
+# @fig-permutation-power.
+crit_satt <- crit_strata |>
+      dplyr::filter(type == "p_satt") |>
+      dplyr::mutate(model = as.character(model)) |>
+      dplyr::select(model, betacat, c_stratum = c_hat)
+
+# The permutation is the resampling unit, as it is everywhere else: the ratio
+# is formed within a permutation and the permutations are then averaged. The
+# same 1,000 sites are reused in every iteration and share a single
+# relabelling within it, so the pooled number of rows would badly overstate
+# the precision available.
+type_m <- est_dat |>
+      dplyr::filter(delta != 0, !is.na(p_satt)) |>
+      dplyr::inner_join(crit_satt, by = c("model", "betacat")) |>
+      dplyr::filter(p_satt <= c_stratum) |>
+      dplyr::summarise(.by = c(model, delta_abs, iter),
+                       n_rejected = dplyr::n(),
+                       ratio = mean(abs(est_M)) / dplyr::first(delta_abs)) |>
+      dplyr::summarise(.by = c(model, delta_abs),
+                       m.ratio = mean(ratio),
+                       mcse = stats::sd(ratio) / sqrt(dplyr::n()),
+                       n_iter = dplyr::n()) |>
+      dplyr::mutate(lo = m.ratio - 1.96 * mcse,
+                    hi = m.ratio + 1.96 * mcse)
+
+type_m_small <- type_m |>
+      dplyr::filter(delta_abs == min(delta_abs)) |>
+      dplyr::summarise(lo = min(m.ratio), hi = max(m.ratio))
+
+type_m_large <- type_m |>
+      dplyr::filter(delta_abs == max(delta_abs)) |>
+      dplyr::summarise(lo = min(m.ratio), hi = max(m.ratio))
+
+```
+
+```{r}
+#| label: fig-bias-type-m
+#| eval: true
+#| echo: false
+#| fig-width: 7
+#| fig-height: 4
+#| fig-cap: "Exaggeration (type M) ratio: the mean magnitude of the estimates that survive the size-adjusted threshold, divided by the effect that generated them. A ratio of one, the dashed line, means that a reported estimate is on average the effect it came from. The ratio grows as the effect shrinks because a small effect is only detected on the permutations in which it was over-estimated. Error bars are 95% Monte Carlo intervals over permutations."
+
+type_m |>
+      dplyr::mutate(Model = lab_model(model)) |>
+
+      ggplot(aes(delta_abs, m.ratio, colour = Model, shape = Model,
+                 group = Model)) +
+      geom_hline(yintercept = 1, lty = 2, colour = "gray60") +
+      geom_line() +
+      geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.03) +
+      geom_point(size = 2) +
+      theme_classic() +
+      theme(legend.position = "bottom",
+            legend.title = element_blank(),
+            legend.text = ggtext::element_markdown(),
+            axis.title.x = ggtext::element_markdown()) +
+      scale_colour_manual(values = colors) +
+      scale_shape_manual(values = c(21, 24)) +
+      scale_x_continuous(breaks = deltas) +
+      labs(x = "Added effect (|&delta;|, M-value units)",
+           y = "Exaggeration ratio")
+
+```
+
+The exaggeration ratio is largest for the smallest effects, reaching `r sprintf("%.2f", type_m_small$lo)`–`r sprintf("%.2f", type_m_small$hi)` at |&delta;| = `r min(deltas)` and falling to `r sprintf("%.2f", type_m_large$lo)`–`r sprintf("%.2f", type_m_large$hi)` at |&delta;| = `r max(deltas)` (@fig-bias-type-m). This is not a defect of either model, and the two arms behave alike. An effect of the smallest size is detected only on the permutations in which it happened to be over-estimated, so the estimates that pass the threshold are, on average, several times the effect that generated them; an effect large enough to be detected reliably is reported at close to its true magnitude. It is a reason to report effect sizes for all sites rather than only for the significant ones, and it applies whichever model is fitted.
 
 
 
@@ -1127,123 +1809,575 @@ nsites <- nrow(anno)
 
 The unfiltered Illumina EPIC data has over 800 000 CpG positions. After filtering the available dataset contained `r nsites` CpG positions. Since the strategy here is to detect differentially methylated positions (DMP) we will fit a model per available position using the &beta;- and M-values and their respective model (generalized linear model with &beta; and normal likelihoods, respectively). 
 
+### Loading the full model results
+
+The four arms are fitted by `analysis/R/methylation-case-full.R`, which writes one file per arm to `analysis/data/derived_data/full_v2/` together with a small timing sidecar. The arms are the same four as in the permutation study above, read with the same two Wald reference distributions per contrast; the omnibus LRT is not part of the full run.
+
+```{r}
+#| label: full-model-import
+#| eval: true
+
+# The results directory is VERSIONED in the same way as the permutation
+# directory: full_v2/ holds the four-arm run (beta, beta_reml, m, m_reml)
+# with `p_wald` and `p_satt` per contrast, the latter on the REML arms only.
+# The earlier two-arm files in the derived_data root (beta-model-full.RDS,
+# m-model-full.RDS) carry a different summary schema and are superseded by it.
+full_dir   <- here::here("analysis/data/derived_data/full_v2")
+full_arms  <- c("beta", "beta_reml", "m", "m_reml")
+full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
+
+# Unlike the permutation study, a missing file is NOT refitted on the fly: the
+# four arms together are close to a day of wall-clock time (see the timings
+# reported below), so what is missing is reported instead.
+if (!all(file.exists(full_files)))
+      stop("missing arm files in full_v2/: ",
+           paste(basename(full_files[!file.exists(full_files)]),
+                 collapse = ", "),
+           ". Run analysis/R/methylation-case-full.R first.",
+           call. = FALSE)
+
+# Optionally trim the read to a subset of fixed effects. All terms are kept by
+# default; the four time contrasts plus the intercept over 770 441 sites is
+# ~3.9 million rows per arm, so setting this to the contrast(s) actually
+# reported is the lever if the render is memory-bound.
+full_keep_terms <- NULL
+
+# One arm at a time. Each arm object is on the order of 10^2 MB, so the
+# per-fit diagnostics are joined on WITHIN the arm and the arm is dropped
+# before the next one is read, rather than binding four whole arms and joining
+# afterwards.
+read_full_arm <- function(file) {
+
+      arm <- readRDS(file)
+
+      summaries <- if (is.null(full_keep_terms)) arm$summaries else
+            dplyr::filter(arm$summaries, term %in% full_keep_terms)
+
+      # Carry convergence, singularity and the participant SD across from the
+      # evaluation slot, exactly as perm_dat does above: the arms fail at
+      # different rates, so a failed fit has to be droppable from the tests
+      # rather than quietly changing which sites each arm is scored on.
+      dat <- summaries |>
+            dplyr::inner_join(dplyr::select(arm$evaluations, target,
+                                            convergence, singular, re_sd),
+                              by = "target") |>
+            # Constant within an arm, so stored as factors: at this number of
+            # rows the same three labels as character vectors are hundreds of
+            # MB of pointers for no extra information.
+            dplyr::mutate(
+                  model     = factor(arm$model, levels = full_arms),
+                  estimator = factor(if (isTRUE(arm$meta$reml)) "REML" else "ML",
+                                     levels = c("ML", "REML")),
+                  scale     = factor(arm$meta$scale, levels = c("beta", "M")))
+
+      # seqwrap_summarise() drops failed targets rather than returning empty
+      # rows, so a target present in one slot and not the other would silently
+      # shrink the arm here.
+      stopifnot(nrow(dat) == nrow(summaries))
+
+      evaluations <- dplyr::mutate(
+            arm$evaluations,
+            model = factor(arm$model, levels = full_arms))
+
+      # `class` and `message` come back as character vectors named by target;
+      # the names are dropped so the bound frame does not carry four sets of
+      # them.
+      errors <- if (NROW(arm$errors)) {
+            arm$errors |>
+                  dplyr::mutate(class   = unname(class),
+                                message = unname(message),
+                                model   = factor(arm$model, levels = full_arms))
+      } else NULL
+
+      out <- list(dat = dat, evaluations = evaluations,
+                  errors = errors, meta = arm$meta)
+
+      rm(arm, summaries)
+      gc()
+
+      out
+}
+
+full_list <- lapply(full_files, read_full_arm)
+
+# full_dat:    one row per (model, site, fixed effect) -- the frame the
+#              per-position analysis is read from.
+# full_evals:  one row per (model, site) -- fit-level diagnostics.
+# full_errors: one row per condition raised (warnings and errors), by stage.
+# full_meta:   one row per arm -- what was fitted, on how many cores, how long.
+full_dat    <- dplyr::bind_rows(lapply(full_list, `[[`, "dat"))
+full_evals  <- dplyr::bind_rows(lapply(full_list, `[[`, "evaluations"))
+full_errors <- dplyr::bind_rows(lapply(full_list, `[[`, "errors"))
+full_meta   <- dplyr::bind_rows(lapply(full_list, `[[`, "meta"))
+
+rm(full_list)
+gc()
+
+# `reml` in the evaluation slot is read off the fit object, not off the arm
+# name (see eval_fun in the script), so this is the check that the arm
+# labelling agrees with what was actually estimated. The arms are also all
+# fitted on the same set of sites, which is what makes them comparable
+# site-by-site.
+stopifnot(
+      setequal(as.character(full_evals$model), full_arms),
+      all(full_evals$reml == grepl("_reml$", as.character(full_evals$model))),
+      length(unique(full_meta$k)) == 1L,
+      length(unique(full_meta$n)) == 1L)
+
+# The number of sites and samples the full run was fitted on.
+n_full_sites   <- unique(full_meta$k)
+n_full_samples <- unique(full_meta$n)
+
+# The contrasts: 1_baseline is the reference level, so the time terms are the
+# differences from baseline. The intercept is present in full_dat but is not a
+# contrast and is excluded here.
+full_terms <- setdiff(unique(full_dat$term), "(Intercept)")
+
+# The timing sidecar written by the same script, read separately so the
+# per-arm cost is available without loading the arms.
+full_timing <- readRDS(file.path(full_dir, "timing.RDS"))
+
+```
+
+The full run fitted `r n_full_sites` positions in `r n_full_samples` samples per arm, giving `r nrow(full_dat)` estimated parameters across the four arms and `r length(full_terms)` contrasts against baseline (`r paste(full_terms, collapse = ", ")`).
+
+
+#### Effect estimates in the full data
+
+```{r}
+
+
+# Number of convergence fails
+full_dat |> 
+      filter(convergence != 0) |> 
+      distinct(target, model) |> 
+      print()
+      
+
+# Number of ddf fails
+full_dat |>
+      filter(estimator == "REML") |> 
+      filter(is.na(ddf)) |> 
+      distinct(target, model) |> 
+      print()
+
+
+res <- full_dat |>
+      filter(estimator == "REML") |> 
+      filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |> 
+      mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate)) 
+  
+
+
+res |> 
+      
+      mutate(.by = c(term, model), 
+             fdr = p.adjust(p_satt, method = "fdr")) |> 
+      filter(fdr < 0.2)
+
+
+
+sig <- subset(res, p_satt < 0.05 & abs(est_M) > 1)
+bulk <- subset(res, !(p_satt < 0.05 & abs(est_M) > 1))
+
+ggplot(mapping = aes(est_M, -log10(p_satt))) +
+  geom_hex(data = bulk, bins = 120) +
+  scale_fill_gradient(low = "grey90", high = "grey30", trans = "log10") +
+  geom_point(data = sig, aes(colour = est_M > 0),
+             size = 1, alpha = 0.8) +
+  scale_colour_manual(values = c("#2166ac", "#b2182b"), guide = "none") +
+  geom_vline(xintercept = c(-1, 1), linetype = 2, linewidth = 0.3) +
+  geom_hline(yintercept = -log10(0.05), linetype = 2, linewidth = 0.3) + 
+      facet_wrap(model ~ term)
+
+
+
+
+
+```
+
+
+```{r}
+
+full_dat |> 
+      
+      
+      filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |> 
+      filter(!is.na(p_satt)) |> 
+
+      mutate(.by = c(model, term), 
+             fdr = p.adjust(p_wald, method = "fdr"), 
+             fdr.satt = p.adjust(p_satt, method = "fdr")) |> 
+
+      filter(fdr.satt < 0.20) |> 
+      
+      mutate(sign = if_else(estimate > 0, "up", "down")) |> 
+      summarise(.by = c(sign, model, term), 
+                n = n()) |> 
+      arrange(sign, model, term)
+      
+      
+
+```
+
+
+
+
+
 
 ### Computational time
 
+The four arms were fitted one `seqwrap()` call at a time, and the elapsed time of each call is recorded in the timing sidecar written alongside the results (@tbl-timing-full). That says what this run cost. It does not say what the cost is a *function* of, which is the question anyone sizing a different design has to answer, and it cannot be read off a single number per arm.
+
+`analysis/R/methylation-timing-experiment.R` answers it by timing the same four arms on sub-samples of the same data, varying one thing at a time: the number of targets ($k$), the model, and the number of arrays. Everything inside the timed region is what the full run did --- same data, same `arguments`, same `summary_fun` (the Satterthwaite denominator df is a real cost and is paid here too), same `eval_fun`, same `return_models = FALSE`, same core count --- so the fitted intercept and slope are in the units of the full run rather than in units of a benchmark. Cells are run in a randomised order, and a fixed anchor cell is re-run throughout to detect any drift in machine speed over the two hours the experiment takes.
+
 ```{r}
+#| label: reading-timing
+#| eval: true
 #| echo: false
 
+timing_dir <- here::here("analysis/data/derived_data/timing_v1")
 
-# Elapsed time
-beta_model_full <- readRDS(
-      here::here("analysis/data/derived_data/beta-model-full.RDS"))
-m_model_full <- readRDS(
-      here::here("analysis/data/derived_data/m-model-full.RDS"))
+timing_cells <- readRDS(file.path(timing_dir, "timing-cells.RDS"))
+timing_scaling <- readRDS(file.path(timing_dir, "timing-scaling.RDS"))
 
-beta_time <- beta_model_full@elapsed_time
-m_time <- m_model_full@elapsed_time
+# The core count is part of the measurement, not a footnote: the slope is the
+# per-target cost at that width and the intercept is largely cluster start-up,
+# which grows with the number of workers. It is read from the record rather
+# than written into the prose.
+timing_cores <- unique(timing_scaling$session$cores)
 
-beta_time <- round(beta_time[3] /60 /60, 1)
-m_time <- round(m_time[3] /60 /60, 1)
+stopifnot(
+      length(timing_cores) == 1L,
+      identical(as.integer(timing_cores), as.integer(unique(full_timing$cores))))
 
-# Number of sucessfull models 
+# Size block: is the cost linear in k?
+#
+# `timing-scaling.RDS` carries an `exponent` and a `linear` flag from a log-log
+# fit of elapsed time on k. That fit has NO intercept term, so it tests whether
+# elapsed time is PROPORTIONAL to k, which cannot hold when there is a fixed
+# per-call cost of about a minute: at the k used here the intercept dominates,
+# and the exponent it returns (~0.16 to 0.35) measures that dominance rather
+# than the scaling. The saved `linear` column is therefore FALSE for all four
+# arms and is not read here.
+#
+# The test with the intercept restored is elapsed = a + b * k^c, with linearity
+# at c = 1, and the curvature check is whether a quadratic term is needed. Both
+# are computed from the raw cells.
+timing_size <- dplyr::filter(timing_cells, block == "size")
 
+timing_fit <- timing_size |>
+      dplyr::group_by(arm) |>
+      dplyr::group_modify(function(d, key) {
+            lin <- stats::lm(elapsed ~ k, data = d)
+            quad <- stats::lm(elapsed ~ k + I(k^2), data = d)
 
-############# NEEDS FIX ##########################
+            nl <- tryCatch(
+                  stats::nls(
+                        elapsed ~ a + b * k^c,
+                        data = d,
+                        start = list(a = stats::coef(lin)[[1]],
+                                     b = stats::coef(lin)[[2]],
+                                     c = 1),
+                        control = stats::nls.control(maxiter = 200,
+                                                     warnOnly = TRUE)),
+                  error = function(e) NULL)
 
-beta_model_full@errors
+            # Profile intervals on an nls fit can fail to converge; the Wald
+            # interval is the fallback, and NA is reported rather than a number
+            # of unknown provenance if both fail.
+            ci <- if (is.null(nl)) c(NA_real_, NA_real_) else {
+                  s <- summary(nl)$coefficients["c", ]
+                  prof <- tryCatch(suppressMessages(stats::confint(nl, "c")),
+                                   error = function(e) NULL,
+                                   warning = function(w) NULL)
+                  if (is.null(prof)) {
+                        s[["Estimate"]] + c(-1.96, 1.96) * s[["Std. Error"]]
+                  } else {
+                        as.numeric(prof)
+                  }
+            }
 
+            data.frame(
+                  r2 = summary(lin)$r.squared,
+                  exponent = if (is.null(nl)) NA_real_ else stats::coef(nl)[["c"]],
+                  exponent_lo = ci[1],
+                  exponent_hi = ci[2],
+                  p_quadratic = summary(quad)$coefficients["I(k^2)", 4])
+      }) |>
+      dplyr::ungroup()
 
+# The scaling and extrapolation tables, joined on the arm and put in the
+# labelling used everywhere else in this document.
+timing_tab <- timing_scaling$scaling |>
+      dplyr::select(arm, scale, estimator, overhead_s, per_target_s) |>
+      dplyr::inner_join(timing_fit, by = "arm") |>
+      dplyr::inner_join(
+            dplyr::select(timing_scaling$extrapolation,
+                          arm, k_full, predicted_h, observed_h, error_pct),
+            by = "arm") |>
+      dplyr::mutate(per_target_ms = per_target_s * 1000)
 
-m_model_full@errors |> 
-      distinct(message)
-      print()
+# The largest k the experiment ever fitted, against the k the prediction is
+# made at: the extrapolation factor is the thing being asked to hold.
+timing_k_max <- max(timing_size$k)
+timing_extrap_factor <- unique(timing_tab$k_full) / timing_k_max
 
+# Marginal cost in the two blocks that hold k fixed.
+#
+# `per_target_ms` in those blocks is elapsed / k, so it still carries the
+# per-call overhead amortised over k targets -- at k = 2000 that is about 31 ms
+# of the ~45 ms reported, and it is the same 31 ms in every row, which flattens
+# the comparison the block exists to make. Subtracting the overhead measured in
+# the size block leaves the marginal cost, which is what varies.
+timing_overhead <- stats::setNames(timing_scaling$scaling$overhead_s,
+                                   timing_scaling$scaling$arm)
+
+k_complexity <- unique(dplyr::filter(timing_cells, block == "complexity")$k)
+k_samples <- unique(dplyr::filter(timing_cells, block == "samples")$k)
+
+stopifnot(length(k_complexity) == 1L, length(k_samples) == 1L)
+
+timing_complexity <- timing_scaling$complexity |>
+      dplyr::mutate(
+            arm_ref = dplyr::if_else(scale == "M", "m", "beta"),
+            marginal_ms = per_target_ms -
+                  timing_overhead[arm_ref] * 1000 / k_complexity)
+
+timing_samples <- timing_scaling$samples |>
+      dplyr::mutate(marginal_ms = per_target_ms -
+                          timing_overhead[arm] * 1000 / k_samples)
+
+# The coherence check on that subtraction: rung 3 of the complexity ladder is
+# the full-run model, so its marginal cost has to reproduce the slope the size
+# block measured independently for the same arm.
+timing_rung3 <- timing_complexity |>
+      dplyr::filter(ladder == 3) |>
+      dplyr::transmute(arm = arm_ref, ladder_ms = marginal_ms) |>
+      dplyr::inner_join(dplyr::select(timing_tab, arm, per_target_ms),
+                        by = "arm") |>
+      dplyr::mutate(diff_pct = 100 * (ladder_ms - per_target_ms) / per_target_ms)
+
+timing_anchor <- timing_scaling$anchor
+
+# Display strings, precomputed so that the table captions carry no quoting of
+# their own: a caption is a YAML scalar, and nesting escaped quotes inside one
+# is a rendering failure waiting to happen.
+full_k_fmt <- format(unique(full_timing$k), big.mark = " ")
+full_n_samples <- unique(full_timing$n)
+timing_k_max_fmt <- format(timing_k_max, big.mark = " ")
+timing_k_full_fmt <- format(unique(timing_tab$k_full), big.mark = " ")
+timing_extrap_fmt <- sprintf("%.0f", timing_extrap_factor)
+k_complexity_fmt <- format(k_complexity, big.mark = " ")
 
 ```
 
-Running the full model took `r beta_time` and `r m_time` hours for the &beta; and M-models, respectively using 12 cores on a laptop computer (AMD Ryzen 5 7540U, 3.2 GHz, 16 GB RAM).
+```{r}
+#| label: tbl-timing-full
+#| eval: true
+#| echo: false
+#| tbl-cap: "Elapsed wall-clock time of the full run, one `seqwrap()` call per arm, on `r timing_cores` cores. Each arm fitted the same `r full_k_fmt` positions in `r full_n_samples` samples."
 
-The &beta;-regression model returned estimates for all `r beta_errors_sum[1]` sites while the model on M-values flagged `r m_errors_sum[3]` models for convergence issues.
+full_timing |>
+      dplyr::transmute(model = lab_model(model),
+                       scale = dplyr::if_else(scale == "beta",
+                                              "&beta;", "M"),
+                       estimator,
+                       hours,
+                       per_target_ms = 1000 * elapsed / k) |>
+      gt() |>
+      fmt_number(columns = hours, decimals = 2) |>
+      fmt_number(columns = per_target_ms, decimals = 1) |>
+      gt::cols_label(model = "Model",
+                     scale = "Scale",
+                     estimator = "Estimator",
+                     hours = "Hours",
+                     per_target_ms = md("Per position<br>(ms)")) |>
+      fmt_markdown(columns = c("model", "scale"))
 
+```
+
+The cost of a `seqwrap()` call is a fixed overhead plus a constant cost per target. Across the four arms the overhead is `r sprintf("%.0f", min(timing_tab$overhead_s))`--`r sprintf("%.0f", max(timing_tab$overhead_s))` seconds, essentially the same in every arm, which is what it should be if it is cluster start-up and data export rather than model fitting. The marginal cost per target is what separates the arms, and it separates them by estimator rather than by scale: REML costs `r sprintf("%.1f", timing_tab$per_target_ms[timing_tab$arm == "m_reml"] / timing_tab$per_target_ms[timing_tab$arm == "m"])` times ML on the M scale and `r sprintf("%.1f", timing_tab$per_target_ms[timing_tab$arm == "beta_reml"] / timing_tab$per_target_ms[timing_tab$arm == "beta"])` times on the &beta; scale (@tbl-timing-scaling). Part of that multiple is the Satterthwaite denominator df, which is computed on the REML arms only and requires a second differentiation of the likelihood; the rest is the REML fit itself.
+
+```{r}
+#| label: tbl-timing-scaling
+#| eval: true
+#| echo: false
+#| tbl-cap: "Cost of a `seqwrap()` call as a function of the number of targets, fitted on cells of at most `r timing_k_max_fmt` targets, and the resulting prediction of the full run. The exponent is $c$ in elapsed $= a + b k^{c}$, with linearity at $c = 1$; $p$ is for a quadratic term added to the linear fit. Predicted hours are for `r timing_k_full_fmt` targets, an extrapolation of `r timing_extrap_fmt`-fold beyond the largest cell measured."
+
+timing_tab |>
+      dplyr::mutate(model = lab_model(arm)) |>
+      dplyr::select(model, estimator, overhead_s, per_target_ms, r2,
+                    exponent, exponent_lo, exponent_hi, p_quadratic,
+                    predicted_h, observed_h, error_pct) |>
+      gt() |>
+      fmt_number(columns = c(overhead_s, per_target_ms), decimals = 1) |>
+      fmt_number(columns = c(r2, exponent, exponent_lo, exponent_hi),
+                 decimals = 3) |>
+      fmt_number(columns = p_quadratic, decimals = 3) |>
+      fmt_number(columns = c(predicted_h, observed_h), decimals = 2) |>
+      fmt_number(columns = error_pct, decimals = 1) |>
+      gt::cols_merge(columns = c(exponent, exponent_lo, exponent_hi),
+                     pattern = "{1} [{2}, {3}]") |>
+      gt::cols_label(model = "Model",
+                     estimator = "Estimator",
+                     overhead_s = md("Overhead<br>(s)"),
+                     per_target_ms = md("Per target<br>(ms)"),
+                     r2 = md("Linear<br>*R*<sup>2</sup>"),
+                     exponent = md("Exponent<br>[95% CI]"),
+                     p_quadratic = md("*p*<br>quadratic"),
+                     predicted_h = md("Predicted<br>hours"),
+                     observed_h = md("Observed<br>hours"),
+                     error_pct = md("Error<br>(%)")) |>
+      fmt_markdown(columns = "model")
+
+```
+
+Two readings say that the cost is linear in the number of targets. The linear fit accounts for `r sprintf("%.1f", 100 * min(timing_tab$r2))`% or more of the variance in every arm, and the exponent $c$ in elapsed $= a + b k^{c}$ is within sampling error of one in three of the four arms. It is not in `r lab_model("m_reml")`, where $c$ = `r sprintf("%.2f", timing_tab$exponent[timing_tab$arm == "m_reml"])` and a quadratic term is significant, so a slight super-linearity is detectable within the range measured. It does not persist: the chunk size `seqwrap()` chooses is itself a function of $k$ and the core count, so parallel granularity changes across the small-$k$ end of the size block in a way it does not change between there and the full run.
+
+The check that decides whether any of this describes the full run is the extrapolation. Predicting from cells of at most `r format(timing_k_max, big.mark = " ")` targets to the `r format(unique(timing_tab$k_full), big.mark = " ")` the full run fitted is an extrapolation of `r sprintf("%.0f", timing_extrap_factor)`-fold, and nothing in the fit protects it. The predictions come out between `r sprintf("%.1f", min(timing_tab$error_pct))`% and `r sprintf("%+.1f", max(timing_tab$error_pct))`% of the observed times (@tbl-timing-scaling). A cost that grew faster than $k$ would not survive that, and neither would the `r sprintf("%.2f", timing_tab$exponent[timing_tab$arm == "m_reml"])` exponent if it were a property of the algorithm rather than of the range it was measured over.
+
+What the marginal cost is made of can then be read from the two blocks that hold $k$ fixed and vary the model and the sample size instead (@tbl-timing-marginal). Both blocks report elapsed time divided by $k$, which still carries the per-call overhead amortised over the targets --- about `r sprintf("%.0f", 1000 * mean(timing_overhead) / k_complexity)` ms of it at $k$ = `r format(k_complexity, big.mark = " ")`, identically in every row --- so the overhead is subtracted before the rows are compared. The subtraction is checked against something it has to reproduce: rung 3 of the complexity ladder is the full run's own model, and its marginal cost agrees with the slope the size block measured independently for the same arm to within `r sprintf("%.0f", max(abs(timing_rung3$diff_pct)))`%.
+
+```{r}
+#| label: tbl-timing-marginal
+#| eval: true
+#| echo: false
+#| tbl-cap: "Marginal cost per target, with the per-call overhead removed, across the model ladder at $k$ = `r k_complexity_fmt`. `np` is the number of parameters the optimiser estimated. Rung 3 is the model the full run fitted."
+
+timing_complexity |>
+      dplyr::mutate(scale = dplyr::if_else(scale == "beta", "&beta;", "M")) |>
+      dplyr::select(scale, ladder, model_label, np_opt, per_target_ms,
+                    marginal_ms, converged) |>
+      dplyr::arrange(scale, ladder) |>
+      gt() |>
+      fmt_number(columns = c(per_target_ms, marginal_ms), decimals = 1) |>
+      fmt_number(columns = converged, decimals = 3) |>
+      gt::cols_label(scale = "Scale",
+                     ladder = "Rung",
+                     model_label = "Model",
+                     np_opt = "np",
+                     per_target_ms = md("Elapsed / *k*<br>(ms)"),
+                     marginal_ms = md("Marginal<br>(ms)"),
+                     converged = "Converged") |>
+      fmt_markdown(columns = "scale")
+
+```
+
+The ladder is where the cost actually lives. Going from a model with no random effect to the full run's `time + (1 | participant)` roughly triples the marginal cost on the M scale and quadruples it on the &beta; scale, and adding a second random effect adds `r sprintf("%.0f", 100 * (timing_complexity$marginal_ms[timing_complexity$scale == "M" & timing_complexity$ladder == 5] / timing_complexity$marginal_ms[timing_complexity$scale == "M" & timing_complexity$ladder == 3] - 1))`% more on top of that. The number of arrays, by contrast, is close to free over the range available here: taking the participants from four to eight, and the arrays from `r min(timing_samples$n)` to `r max(timing_samples$n)`, moves the marginal cost by at most `r sprintf("%.0f", max(abs(100 * (dplyr::summarise(dplyr::group_by(timing_samples, arm), r = marginal_ms[which.max(n)] / marginal_ms[which.min(n)])$r - 1))))`% in any arm. The cost of a run of this kind is set by how many targets are fitted and how complicated the model is, not by how many samples each target has.
+
+Finally, the anchor cell. It was re-run `r timing_anchor$n_anchor` times over the course of the experiment and measures the machine rather than the software: its mean elapsed time was `r sprintf("%.1f", timing_anchor$mean_s)` s with a coefficient of variation of `r sprintf("%.1f", timing_anchor$cv_pct)`%, and a regression on run order gives a slope of `r sprintf("%.2f", timing_anchor$slope_s_per_cell)` s per cell (*p* = `r sprintf("%.2f", timing_anchor$p_value)`). The machine did not drift, so cells run early and cells run late are comparable and the randomised run order did not have to absorb anything.
 
 
 ```{r}
+nsites
 
 
-m_model_sum <- readRDS(here::here("analysis/data/derived_data/m-model-full-sum.RDS"))
-beta_model_sum <- readRDS(here::here("analysis/data/derived_data/beta-model-full-sum.RDS"))
+# Approximate start up cost
 
-
-beta_model_sum$summaries |> 
-      filter(grepl("time", term)) |> 
-
-      dplyr::select(target, term, estimate, std.error, p.value) |> 
-      mutate(.by = term, 
-             qval = p.adjust(p.value, method = "fdr")) |> 
+start_up <- timing_cells |>
+        dplyr::filter(block == "size") |> 
       
-      filter(term == "time3_loading")  |> 
-      filter(qval < 0.05) |> 
-      arrange(qval)
-       
+      group_by(arm) |> 
+      summarise(intercept = coef(lm(elapsed ~ k))[1]) |> 
+      ungroup() |> 
+      summarise(intercept = mean(intercept)) |> 
+      pull(intercept)
 
 
 
-
-m_model_sum$summaries |> 
-      filter(grepl("time", term)) |> 
-      dplyr::select(target, term, estimate, std.error, p.value) |> 
-      mutate(.by = term, 
-             qval = p.adjust(p.value, method = "fdr")) |> 
+time1 <- timing_cells |>
+        dplyr::filter(block == "size") |>
       
-      filter(term == "time3_loading") |> 
-      filter(qval < 0.05) |> 
-      arrange(qval)
-   
-
-# Read seaborn data 
-sdat <- readxl::read_excel(
-      path = here::here("analysis/data/resource_data/seaborne2018-suppl.xlsx"), 
-                        sheet = 2) |> 
-      select(target = `Column ID`, 
-             p.value = `p-value(Time)`, 
-             ratio_estimate = `MeanRatio(Baseline vs. Chronic Loading)`, 
-             estimate = `Estimate(Baseline vs. Chronic Loading)`
-             ) |> 
-      print()
-
-levels(factor(metadata$time))
-
-  supp <- readxl::read_excel(
-      path = here::here("analysis/data/resource_data/seaborne2018-suppl.xlsx"), sheet = 2)
-  theirs <- supp |>
-    select(target = `Column ID`,
-           their_est = `Estimate(Baseline vs. Chronic Loading)`) |>
-    mutate(their_dir = -sign(their_est))      # flip to loading-minus-baseline   
-
-  ours <- m_model_sum$summaries |>
-    filter(effect == "fixed", component == "cond", term == "time3_loading") |>   
-    select(target, estimate)
-
-  cmp <- inner_join(ours, theirs, by = "target")
-
-  mean(sign(cmp$estimate) == cmp$their_dir)      
-  cor(cmp$estimate, -cmp$their_est, method = "spearman")
-  table(sign(cmp$estimate), cmp$their_dir)
-            
-            
-      ggplot(aes(p.value, org.pval)) + geom_point()
-
-
-      dplyr::select(target, term, estimate, std.error, p.value) |> 
-      mutate(.by = term, 
-             qval = p.adjust(p.value, method = "fdr")) |> 
+      mutate(arm = case_when(arm == "beta" ~  "&beta;<sub>ML</sub>", 
+                             arm == "m" ~  "M<sub>ML</sub>", 
+                             arm == "beta_reml" ~  "&beta;<sub>REML</sub>", 
+                             arm == "m_reml" ~  "M<sub>REML</sub>"), 
+             arm = forcats::fct_reorder(arm, elapsed), 
+             arm = forcats::fct_rev(arm)) |> 
       
-      filter(term == "time4_unloading") |> 
+      
+        ggplot(aes(k, elapsed, fill = arm, 
+                   color = arm)) +
+        geom_point(alpha = 1, 
+                   size = 3,
+                   color = "black",
+                   shape = 21) +
+      
+        scale_fill_manual(values = colors) +
+      scale_color_manual(values = colors) +
+      
+        geom_smooth(method = "lm", se = FALSE, linewidth = 0.4) +
+      labs(x = "m (number of targets)", 
+           y = "Elapsed time (seconds)") +
+      theme_classic() + 
+      scale_y_continuous(limits = c(0, 300), 
+                         expand = c(0, 0)) +
+      
+      geom_hline(yintercept = start_up, lty = 2, color = "gray") +
+      annotate("text", x = 3000, y = start_up + 5, 
+               label = "Start-up cost", 
+               color = "gray40",
+               size = 3) +
+      
+      theme(
+            legend.text = ggtext::element_markdown(), 
+            legend.position = "none"
+      )
 
-      filter(target == "cg15154546")
-      arrange(p.value) |> 
-      print()
+
+# Obs and pred for to category
+annotation_time <- timing_tab |> 
+      filter(arm == "beta_reml") |> 
+      select(observed_h, predicted_h) |> 
+      pivot_longer(cols = everything()) |> 
+      mutate(name = gsub("_h", "", name), 
+             name = stringr::str_to_sentence(name)) 
+
+
+
+time2 <- timing_tab |>
+      dplyr::mutate(model = lab_model(arm)) |>
+      dplyr::select(model, estimator, overhead_s, per_target_ms, r2,
+                    exponent, exponent_lo, exponent_hi, p_quadratic,
+                    predicted_h, observed_h, error_pct) |> 
+      
+      
+      dplyr::select(model, estimator, predicted_h, observed_h) |> 
+      pivot_longer(cols = predicted_h:observed_h) |> 
+      mutate(sites = "m = 770441", 
+             name = if_else(name == "predicted_h", "Predicted", "Observed"), 
+             Model = if_else(name == "Predicted", model, "")) |> 
+       mutate(model = forcats::fct_reorder(model, value), 
+             model = forcats::fct_rev(model)) |> 
+      
+      ggplot(aes(x = sites, value, 
+                 fill = model, shape = name)) + 
+      geom_point(size = 3) + 
+      
+      scale_shape_manual(values = c(21, 24)) + 
+      scale_fill_manual(values = colors) +
+      
+      labs(x = "", 
+           y = "Elapsed time (hours)") +
+      
+      
+      ggtext::geom_richtext(aes(label = Model, color = NULL), 
+                position = position_nudge(x = 0.2), 
+                fill = NA, label.color = NA,        # remove background and outline
+    label.padding = grid::unit(rep(0, 4), "pt")     # remove padding) 
+    )  + 
+      theme_classic() +
+      theme(legend.position = "none") + 
+      annotate("text", x = 0.8, 
+               y = annotation_time$value, 
+               label = annotation_time$name, 
+               size = 3, 
+               color = "gray40") 
+ 
+
+cowplot::plot_grid(time1, time2, rel_widths = c(1, 0.5))
+
 
 
 
@@ -1255,217 +2389,337 @@ levels(factor(metadata$time))
 
 
 
+### Comparison with the published results
 
+The supplementary tables of @seaborne2018 list the positions the original analysis called differentially methylated, one sheet per contrast against baseline, in `analysis/data/resource_data/seaborne2018-suppl.xlsx`. They are read here and compared with the four arms fitted above on the same deposited arrays.
 
-
-
-
-
-
-
-
-
-
-
-
-
-## AIC
-
+The purpose of the comparison is not to audit the original study. It is to show what a calibrated per-position test returns on a real data set of this size, and how far that is from what an uncorrected threshold on a test that ignores the repeated-measures structure returns on the same arrays. The size of the two data sets is identical; only the procedure differs, and the permutation study above is what says which of the two procedures holds its nominal error rate.
 
 ```{r}
+#| label: seaborne-supplement
+#| eval: true
 
+sup_file <- here::here("analysis/data/resource_data/seaborne2018-suppl.xlsx")
 
-# Evaluation function with corrected (Jacobian) AIC for model comparison
-eval_aic_beta <- function(m) {
-    
-      # This calculates the log likelihood for the 
-      # beta model. Adds n (number of obs) for the 
-      # model to double check no dropped obs. 
-      # Adds bsum to confirm the same input
-      
-      beta <- as.numeric(m$frame[[1]])
-      
-      out <- data.frame(ll = as.numeric(logLik(m)), 
-                        n = dim(m$frame)[1], 
-                        bsum = sum(beta))
-      
-      return(out)
-      
+# Sheet 2A is a three-row summary; 2B--2D are the per-contrast lists. Only the
+# first 13 columns carry data, the rest are the trailing empty columns Excel
+# reports. The header sits on the second row of each sheet.
+#
+# `F(Error)` is 1 in every row: it is the numerator df of the test, not an F
+# statistic, and is read as such below.
+sup_sheets <- c(time3_loading   = "Supp 2B; Loading",
+                time4_unloading = "Supp 2C; Unloading",
+                time5_reloading = "Supp 2D; Reloading")
+
+# The time level each sheet compares against baseline, and the sample counts
+# actually deposited, which the degrees of freedom are checked against below.
+sup_levels <- c(time3_loading = "3_loading", time4_unloading = "4_unloading",
+                time5_reloading = "5_reloading")
+
+meta_full <- readRDS(
+      here::here("analysis/data/derived_data/seaborne-metadata.RDS"))
+
+read_sup <- function(sheet) {
+      x <- suppressMessages(
+            readxl::read_excel(sup_file, sheet = sheet, skip = 1,
+                               col_names = FALSE))[, 1:13]
+      names(x) <- c("column", "id", "gene", "p_time", "p_pair", "meanratio",
+                    "fc", "fc_desc", "estimate", "f_time", "ss_time",
+                    "ss_error", "df_time")
+      dplyr::mutate(x, dplyr::across(c(column, p_time, p_pair, meanratio, fc,
+                                       estimate, f_time, ss_time, ss_error,
+                                       df_time), as.numeric))
 }
 
-eval_aic_m <- function(m) {
-      
-      # This calculates the log likelihood for the 
-      # M model. Adds n (number of obs) for the 
-      # model to double check no dropped obs. 
-      # Adds bsum to confirm the same input
-      # The jacobian correction is added to the log likelihood.
-      
-      M <- as.numeric(m$frame[[1]])
-      beta <- stats::plogis(M * log(2))
-      # Jacobian correction
-      jac <- -log(log(2)) - log(beta) - log(1-beta)
-      # Corrected ll, n, and sum of beta values
-      out <- data.frame(ll = as.numeric(logLik(m)) + sum(jac), 
-                        n = dim(m$frame)[1], 
-                        bsum = sum(beta))
-      
-       return(out)
-      
-}
+sup <- dplyr::bind_rows(lapply(sup_sheets, read_sup), .id = "term")
 
+# The direction convention. `Estimate` is the baseline mean MINUS the
+# condition mean on the beta scale: a POSITIVE estimate is a site that is
+# hypomethylated relative to baseline at the later time point, which is how
+# the FoldChange description column reads it ("Baseline up vs ..."). Our
+# contrasts run the other way, condition minus baseline, so the two are
+# compared through `-estimate` throughout.
+stopifnot(
+      all(grepl("^Baseline up", sup$fc_desc[sup$estimate > 0])),
+      all(grepl("^Baseline down", sup$fc_desc[sup$estimate < 0])))
 
+# The test behind the p-values. `p-value(Time)` and the pairwise p-value are
+# the same number in every row, and both are reproduced by the F statistic on
+# 1 and (n_baseline + n_condition - 2) denominator degrees of freedom: a
+# two-group comparison in which the repeated measurements on a participant are
+# treated as independent, not a repeated-measures analysis of the full design.
+#
+# The df is not assumed here, it is taken from the deposited sample counts and
+# then checked against the reported p-values. That it agrees to rounding is
+# also what establishes that the supplement was computed on the arrays we
+# have: the same test on a different number of arrays would not reproduce.
+stopifnot(identical(sup$p_time, sup$p_pair))
 
+sup_ddf <- vapply(sup_levels, function(lv)
+      sum(meta_full$time == "1_baseline") + sum(meta_full$time == lv) - 2,
+      numeric(1))
 
-# Setting up the models
-bm1 <- seqwrap_compose(
-      modelfun = glmmTMB::glmmTMB, 
-      data = betadf, 
-      metadata = metadata, 
-      samplename = "geo_accession", 
-      eval_fun = eval_aic_beta,
-      arguments = list(
-            formula = y ~ time + (1|participant),
-            family = glmmTMB::beta_family)
-)
+sup_p_check <- sup |>
+      dplyr::mutate(ddf = sup_ddf[term]) |>
+      dplyr::summarise(.by = term,
+                       ddf = dplyr::first(ddf),
+                       max_dev = max(abs(pf(f_time, 1, ddf, lower.tail = FALSE) -
+                                               p_pair)))
 
+# The listed positions are everything below an uncorrected 0.05.
+sup_alpha <- max(sup$p_pair)
 
-mm1 <- seqwrap_compose(
-      modelfun = glmmTMB::glmmTMB, 
-      data = mdf, 
-      metadata = metadata, 
-      samplename = "geo_accession", 
-      eval_fun = eval_aic_m,
-      arguments = list(
-            formula = y ~ time + (1|participant))
-)
-
-
-
-
-bm1_results <- seqwrap(bm1, 
-                       subset = subset$row_id, 
-                       return_models = FALSE, 
-                       cores = parallel::detectCores())
-
-
-mm1_results <- seqwrap(mm1, 
-                       subset = subset$row_id,
-                       return_models = FALSE, 
-                       cores = parallel::detectCores())
-
-
-
-
-
-
-
-saveRDS(bm1_results, here::here("analysis/data/derived_data/bm1_results.RDS"))
-saveRDS(mm1_results, here::here("analysis/data/derived_data/mm1_results.RDS"))
-
-
-
-bm1_sum <- seqwrap_summarise(bm1_results)
-mm1_sum <- seqwrap_summarise(mm1_results)
-
-
-
-aic_dat <- mm1_sum$evaluations |> 
-      mutate(model = "mm") |> 
-      bind_rows(
-            bm1_sum$evaluations |> 
-      mutate(model = "bm")) |>  
-      pivot_wider(names_from = model, 
-                  values_from = c(ll, bsum)) |> 
-      # Compare beta sum to check
-      mutate(comp = bsum_mm - bsum_bm) |> 
-      # Calculate AIC delta
-      mutate(delta_aic = -2 * (ll_mm - ll_bm)) |> 
-      inner_join(subset |> 
-                       rename(target = id)) 
-     
-   aic_dat |>    
-      ggplot(aes(delta_aic)) + geom_line(stat = "density") + 
-      facet_wrap(~ betacat) 
-      
-
-aicm <- lm(delta_aic ~ 0 + betacat, data = aic_dat)
-summary(aicm)
-
-
-mm1_sum$evaluations |> 
-      mutate(model = "mm") |> 
-      bind_rows(
-            bm1_sum$evaluations |> 
-      mutate(model = "bm")) |> 
-            
-      inner_join(subset |> 
-                       rename(target = id)) |>  
-      
-     
-      
-      ggplot(aes(quantile)) + geom_histogram() + 
-      facet_grid(betacat ~ model)
-
-
-mm1_sum$evaluations |> 
-      mutate(model = "mm") |> 
-      bind_rows(
-            bm1_sum$evaluations |> 
-      mutate(model = "bm")) |> 
-            
-      inner_join(subset |> 
-                       rename(target = id)) |> 
-      inner_join(cden |> 
-                       rename(target = id)) |> 
-      
-      select(target, betacat, quantile, model, intensity_cat) |> 
-
-      ggplot(aes(quantile)) + geom_histogram() + 
-
-      
-      facet_wrap(intensity_cat ~ model)
-
-
-
-
-
-
-mm1_sum$evaluations |> 
-      rename(mm = pval) |> 
-      inner_join(
-            bm1_sum$evaluation |> 
-                  rename(bm = pval)
-      ) |> 
-       inner_join(subset |> 
-                       rename(target = id)) |> 
-      ggplot(aes(bm, mm)) + geom_point() + 
-      facet_wrap(~ betacat)
-
-
-
-bm1_sum$evaluations
-
-
-m <- bm1_results@models[[1]]
-m <- mm1_results@models[[1]]
-
-
-summary(m)
-
+sup_n <- sup |>
+      dplyr::summarise(.by = term,
+                       n_sup = dplyr::n(),
+                       hyper = sum(estimate < 0),
+                       hypo = sum(estimate > 0))
 
 ```
 
+The p-values in the supplement are reproduced to `r sprintf("%.1e", max(sup_p_check$max_dev))`, the rounding of the file, by an F statistic on 1 and `r paste(sup_p_check$ddf, collapse = ", ")` denominator degrees of freedom for the three contrasts. Those are the degrees of freedom of a two-group comparison of the `r paste(sup_p_check$ddf + 2, collapse = ", ")` arrays deposited for each contrast, so the published lists come from a test that treats the repeated measurements on a participant as independent, computed on the same arrays that are refitted here. The threshold applied to them is an uncorrected p < `r sprintf("%.2f", sup_alpha)`.
 
+#### Number of positions called
 
+```{r}
+#| label: tbl-seaborne-counts
+#| eval: true
+#| tbl-cap: "Positions called differentially methylated against baseline. The published column is the supplementary table of Seaborne et al., an uncorrected threshold on a two-group test; the remaining columns are the four arms fitted here on the same arrays, at the same uncorrected threshold and after Benjamini-Hochberg correction across all positions within a contrast. The Satterthwaite reference distribution is used where the arm provides one."
 
+# Counts are formed with p.adjust() inside the summary rather than as a column
+# on full_dat: the adjustment is over all positions within a contrast, and
+# materialising it for 15.4 million rows is memory for nothing.
+full_counts <- full_dat |>
+      dplyr::filter(term %in% names(sup_sheets), convergence == 0) |>
+      dplyr::mutate(p_use = dplyr::if_else(is.na(p_satt), p_wald, p_satt)) |>
+      dplyr::summarise(.by = c(model, term),
+                       n_tested = dplyr::n(),
+                       p05 = sum(p_use < 0.05, na.rm = TRUE),
+                       fdr05 = sum(p.adjust(p_use, "BH") < 0.05, na.rm = TRUE))
 
+lab_contrast <- function(x) {
+      dplyr::recode(as.character(x),
+                    time3_loading   = "Loading",
+                    time4_unloading = "Unloading",
+                    time5_reloading = "Reloading")
+}
 
-see here https://link.springer.com/article/10.1186/1471-2105-11-587
+full_counts |>
+      dplyr::mutate(Contrast = lab_contrast(term)) |>
+      dplyr::select(Contrast, model, p05, fdr05) |>
+      tidyr::pivot_longer(c(p05, fdr05), names_to = "Threshold") |>
+      tidyr::pivot_wider(names_from = model, values_from = value) |>
+      dplyr::left_join(sup_n |>
+                             dplyr::mutate(Contrast = lab_contrast(term)) |>
+                             dplyr::select(Contrast, Published = n_sup),
+                       by = "Contrast") |>
+      # The published lists exist at one threshold only, so the corrected row
+      # is left empty rather than repeating the uncorrected count.
+      dplyr::mutate(Published = dplyr::if_else(Threshold == "p05",
+                                               Published, NA_integer_),
+                    Threshold = dplyr::if_else(Threshold == "p05",
+                                               "p < 0.05, uncorrected",
+                                               "FDR < 0.05")) |>
+      dplyr::relocate(Published, .after = Threshold) |>
+      gt(groupname_col = "Contrast") |>
+      gt::cols_label(beta = md("&beta;<sub>ML</sub>"),
+                     beta_reml = md("&beta;<sub>REML</sub>"),
+                     m = md("M<sub>ML</sub>"),
+                     m_reml = md("M<sub>REML</sub>")) |>
+      gt::tab_spanner(label = "This analysis",
+                      columns = c(beta, beta_reml, m, m_reml)) |>
+      fmt_number(columns = c(Published, beta, beta_reml, m, m_reml),
+                 decimals = 0) |>
+      sub_missing(missing_text = "--")
 
+```
 
+At the threshold the original analysis used, our arms return the same order of magnitude of positions as the published lists: tens of thousands per contrast out of `r format(n_full_sites, big.mark = " ")`. That is what an uncorrected 5% threshold returns whether or not anything is there. After correcting for the number of positions tested, the four arms return at most a few hundred positions, and the two arms the permutation study found to hold their nominal size -- REML with Satterthwaite denominator degrees of freedom -- return none at all.
 
+#### Which positions
 
+The counts are of a similar size; the positions are not the same ones.
 
+```{r}
+#| label: seaborne-overlap
+#| eval: true
 
+# Every position in the supplement, joined to our estimate of the same
+# contrast at the same position.
+sup_join <- full_dat |>
+      dplyr::filter(term %in% names(sup_sheets), convergence == 0) |>
+      dplyr::inner_join(dplyr::select(sup, id, term, sup_p = p_pair,
+                                      sup_est = estimate),
+                        by = c("target" = "id", "term"))
 
+sup_cover <- sup |>
+      dplyr::summarise(.by = term,
+                       n_sup = dplyr::n(),
+                       in_ours = sum(id %in% unique(full_dat$target)))
+
+# Agreement, per arm and contrast:
+#
+# rep_005    the proportion of the published positions that this arm also puts
+#            below 0.05 -- to be read against `base_005`, the proportion of ALL
+#            positions this arm puts below 0.05. Equal values mean the
+#            published list carries no information about our p-values.
+# sign_agree the proportion on which the two analyses agree about the
+#            direction of the change (their -estimate against ours).
+# rho        Spearman correlation of the two p-value rankings.
+sup_agree <- sup_join |>
+      dplyr::mutate(p_use = dplyr::if_else(is.na(p_satt), p_wald, p_satt)) |>
+      dplyr::summarise(.by = c(model, term),
+                       n = dplyr::n(),
+                       rep_005 = mean(p_use < 0.05, na.rm = TRUE),
+                       sign_agree = mean(sign(estimate) == sign(-sup_est)),
+                       rho = cor(-log10(p_use), -log10(sup_p),
+                                 method = "spearman", use = "complete.obs"))
+
+sup_base <- full_dat |>
+      dplyr::filter(term %in% names(sup_sheets), convergence == 0) |>
+      dplyr::mutate(p_use = dplyr::if_else(is.na(p_satt), p_wald, p_satt)) |>
+      dplyr::summarise(.by = c(model, term),
+                       base_005 = mean(p_use < 0.05, na.rm = TRUE))
+
+sup_agree <- dplyr::left_join(sup_agree, sup_base, by = c("model", "term"))
+
+```
+
+```{r}
+#| label: tbl-seaborne-overlap
+#| eval: true
+#| echo: false
+#| tbl-cap: "Agreement between the published lists and the fits reported here, per arm and contrast. Replicated is the proportion of the published positions that this arm also places below an uncorrected 0.05, and Background the proportion of all positions it places below 0.05; equality of the two means that knowing a position is on the published list says nothing about its p-value here. Direction is the proportion on which the two analyses agree about the sign of the change, and would be 0.5 for unrelated lists."
+
+sup_agree |>
+      dplyr::mutate(Contrast = lab_contrast(term), Model = lab_model(model)) |>
+      dplyr::select(Contrast, Model, n, rep_005, base_005, sign_agree, rho) |>
+      gt(groupname_col = "Contrast") |>
+      gt::cols_label(n = "Positions", rep_005 = "Replicated",
+                     base_005 = "Background", sign_agree = "Direction",
+                     rho = md("Spearman &rho;")) |>
+      fmt_number(columns = c(rep_005, base_005, sign_agree, rho),
+                 decimals = 3) |>
+      fmt_markdown(columns = "Model")
+
+```
+
+`r sprintf("%.0f", 100 * mean(sup_cover$in_ours / sup_cover$n_sup))`% of the published positions survive the filtering applied here and can be compared at all. Of those, the proportion our fits also put below an uncorrected 0.05 is the proportion any arbitrary set of positions would reach, the two analyses agree about the direction of the change at close to the 50% expected of unrelated lists, and the rank correlation between the two sets of p-values is indistinguishable from zero (@tbl-seaborne-overlap).
+
+This is not a disagreement between the two models. It survives fitting the published analysis itself:
+
+```{r}
+#| label: seaborne-rerun
+#| eval: true
+
+# Their test, re-run on the deposited arrays: a two-group comparison of
+# baseline against the later time point on beta values, participants treated
+# as independent, which is the test the 1 and 14 df identify. If the published
+# statistics are recoverable from these arrays at all, this is what recovers
+# them.
+beta_vals <- minfi::getBeta(gset, offset = 100)
+meta_full <- meta_full[match(colnames(beta_vals), meta_full$geo_accession), ]
+
+two_group <- function(mat, i1, i2) {
+      n1 <- length(i1); n2 <- length(i2)
+      m1 <- rowMeans(mat[, i1, drop = FALSE])
+      m2 <- rowMeans(mat[, i2, drop = FALSE])
+      ss <- rowSums((mat[, i1, drop = FALSE] - m1)^2) +
+            rowSums((mat[, i2, drop = FALSE] - m2)^2)
+      df2 <- n1 + n2 - 2
+      tstat <- (m1 - m2) / sqrt((ss / df2) * (1 / n1 + 1 / n2))
+      data.frame(id = rownames(mat), rerun_est = m1 - m2, rerun_df = df2,
+                 rerun_p = 2 * pt(-abs(tstat), df2))
+}
+
+i_base <- which(meta_full$time == "1_baseline")
+
+rerun <- dplyr::bind_rows(lapply(names(sup_levels), function(tm)
+      dplyr::mutate(two_group(beta_vals, i_base,
+                              which(meta_full$time == sup_levels[[tm]])),
+                    term = tm)))
+
+rm(beta_vals)
+gc()
+
+# `rerun_est` is baseline minus condition, the same direction as their
+# `estimate`, so these are directly comparable numbers rather than a
+# transformation of ours.
+sup_rerun <- sup |>
+      dplyr::inner_join(rerun, by = c("id", "term")) |>
+      dplyr::summarise(.by = term,
+                       n = dplyr::n(),
+                       rho_p = cor(rerun_p, p_pair, method = "spearman"),
+                       r_est = cor(rerun_est, estimate),
+                       sign_agree = mean(sign(rerun_est) == sign(estimate)),
+                       med_reported = median(abs(estimate)),
+                       med_observed = median(abs(rerun_est)))
+
+```
+
+Re-running the published test on the deposited arrays does not recover the published numbers either: the rank correlation between the re-run and the reported p-values is `r sprintf("%.3f", min(sup_rerun$rho_p))`--`r sprintf("%.3f", max(sup_rerun$rho_p))`, the two agree on the direction of the change for `r sprintf("%.0f", 100 * min(sup_rerun$sign_agree))`--`r sprintf("%.0f", 100 * max(sup_rerun$sign_agree))`% of the positions, and the reported effect sizes are about `r sprintf("%.0f", median(sup_rerun$med_reported / sup_rerun$med_observed))` times the mean differences those same positions actually show in the deposited data (median |&Delta;&beta;| of `r sprintf("%.3f", median(sup_rerun$med_reported))` reported against `r sprintf("%.3f", median(sup_rerun$med_observed))` observed). The identifiers themselves are valid EPIC positions and are paired with the same column numbers in all three sheets, so what cannot be reconciled is the pairing of the statistics with the positions rather than either one on its own. We therefore make no claim about which positions the original analysis would have called, and the comparison is confined to what does not depend on that pairing: the number of positions and the overall direction of change.
+
+```{r}
+#| label: fig-seaborne-overlap
+#| eval: true
+#| echo: false
+#| fig-width: 7
+#| fig-height: 3
+#| fig-cap: "Published p-values against the p-values obtained here for the same positions, M-values with REML and Satterthwaite denominator degrees of freedom. Each point is one position on one contrast. If the two analyses were measuring the same thing on the same arrays the points would concentrate along the diagonal."
+
+sup_join |>
+      dplyr::filter(model == "m_reml", !is.na(p_satt)) |>
+      dplyr::mutate(Contrast = lab_contrast(term)) |>
+      ggplot(aes(-log10(sup_p), -log10(p_satt))) +
+      geom_point(alpha = 0.08, size = 0.5, colour = colors[3]) +
+      geom_abline(slope = 1, intercept = 0, lty = 2, colour = "gray50") +
+      facet_wrap(~ Contrast) +
+      theme_classic() +
+      labs(x = "Published &minus;log<sub>10</sub> p",
+           y = "&minus;log<sub>10</sub> p, M<sub>REML</sub>") +
+      theme(axis.title.x = ggtext::element_markdown(),
+            axis.title.y = ggtext::element_markdown())
+
+```
+
+#### Direction of change
+
+The conclusion drawn from the published lists is that hypomethylation predominates and is most pronounced after reloading, which is the evidence offered for a retained methylation signature. That claim is a property of the lists as a whole rather than of any one position, so it can be checked here even though the positions cannot be matched.
+
+```{r}
+#| label: tbl-seaborne-direction
+#| eval: true
+#| tbl-cap: "The proportion of positions that are hypomethylated relative to baseline: in the published lists, across all positions fitted here, and among the positions this analysis places below an uncorrected 0.05. A position is hypomethylated when the estimated change from baseline is negative."
+
+dir_ours <- full_dat |>
+      dplyr::filter(term %in% names(sup_sheets), convergence == 0) |>
+      dplyr::mutate(p_use = dplyr::if_else(is.na(p_satt), p_wald, p_satt)) |>
+      dplyr::summarise(.by = c(model, term),
+                       all_hypo = mean(estimate < 0),
+                       sig_hypo = mean(estimate[p_use < 0.05] < 0,
+                                       na.rm = TRUE),
+                       n_sig = sum(p_use < 0.05, na.rm = TRUE))
+
+dir_ours |>
+      dplyr::mutate(Contrast = lab_contrast(term), Model = lab_model(model)) |>
+      dplyr::left_join(sup_n |>
+                             dplyr::mutate(Contrast = lab_contrast(term),
+                                           sup_hypo = hypo / n_sup) |>
+                             dplyr::select(Contrast, sup_hypo),
+                       by = "Contrast") |>
+      dplyr::select(Contrast, Model, sup_hypo, all_hypo, sig_hypo) |>
+      gt(groupname_col = "Contrast") |>
+      gt::cols_label(sup_hypo = "Published", all_hypo = "All positions",
+                     sig_hypo = md("p < 0.05")) |>
+      gt::tab_spanner(label = "Proportion hypomethylated",
+                      columns = c(sup_hypo, all_hypo, sig_hypo)) |>
+      fmt_number(columns = c(sup_hypo, all_hypo, sig_hypo), decimals = 3) |>
+      fmt_markdown(columns = "Model")
+
+```
+
+The ordering across the three contrasts is the opposite of the published one (@tbl-seaborne-direction). Here hypomethylation is most pronounced after loading and least pronounced after reloading, and the same ordering appears across all positions rather than only the called ones: the median change from baseline over the whole array is negative after loading and positive after reloading.
+
+That ordering is, however, a property of the normalization rather than of the model. @seaborne2018 normalized with SWAN, a within-array method, where the pipeline used here (`analysis/R/methylation-case-study-dataprep.R`) uses functional normalization, which additionally removes between-array variation using the control probes. `analysis/R/methylation-normalization-check.R` repeats the filtering and the M<sub>REML</sub> fits on a subset under both, and the two disagree on exactly this point: under SWAN hypomethylation predominates at every time point and is most pronounced after reloading, the published ordering, and under functional normalization it is most pronounced after loading and reloading tips to net hypermethylation. The positions each returns differ correspondingly, with about half of an uncorrected 5% list specific to the normalization.
+
+A direction shared by the majority of several hundred thousand positions, and reversible by a change of normalization, is a property of the arrays rather than of a set of positions, and neither ordering should be read as a methylation signature on its own. What does not depend on the normalization is the multiplicity: no position survives correction under either, in either the models fitted here or the test the original analysis used.
