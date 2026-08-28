@@ -48,23 +48,41 @@
 #     is not a per-site threshold. Both are stored; `n_lfsr_05` is the count
 #     the case study reports.
 #
-# ONE THING TO READ BEFORE THE COUNTS. ash assumes the true effects are
-# unimodal about zero. Two of these contrasts are not centred at zero: the mean
-# estimate is -0.023 M units at 2_acute and -0.034 at 3_loading, against -0.003
-# at 4_unloading and +0.011 at 5_reloading. A prior centred at zero can only
-# explain a bulk sitting off zero by calling the bulk real, and that is visible
-# in the output -- 3_loading returns pi0 = 0.04 and declares some 85% of sites,
-# where 4_unloading returns pi0 = 0.73 and declares none.
+# ONE THING TO READ BEFORE THE COUNTS, because on two of these four contrasts
+# `n_lfsr_05` does not measure what it appears to.
 #
-# The offset is not something this script can resolve. A shift shared by every
-# probe on the array is either a real global change in methylation at that
-# timepoint or residual technical variation between timepoints, and the two
-# enter the effect estimates identically. It belongs upstream, with the
-# normalization. `mean_est` is carried in the summary table so that a contrast
-# whose count is driven by the offset cannot be read without it. Re-centring
-# the prior instead (mode = "estimate") is NOT a fix: it drives pi0 to ~1 and
-# makes the lfsr meaningless, because once the prior mode sits at -0.03 every
-# posterior is confidently negative.
+# ash assumes the true effects are unimodal about zero. 2_acute and 3_loading
+# are not centred at zero -- the mean estimate is -0.023 and -0.034 M units,
+# against -0.003 at 4_unloading and +0.011 at 5_reloading -- and a prior with
+# its mode pinned at zero can only explain a bulk sitting off zero by putting
+# all of its non-null mass on one side. That is exactly what it does: on both
+# contrasts the fitted prior is 100% negative and every posterior mean comes
+# back negative.
+#
+# A one-sided prior puts a FLOOR under the lfsr. For a site with no evidence of
+# its own the posterior is the prior, so P(beta >= 0) = pi0 and P(beta <= 0) = 1,
+# giving lfsr = pi0 exactly. Measured: pi0 = 0.077 and lfsr = 0.079 at 2_acute,
+# pi0 = 0.042 and lfsr = 0.043 at 3_loading. Thresholding at 0.05 is then a
+# switch rather than a test -- below pi0 it declares almost nothing, above pi0
+# almost everything -- and those two contrasts happen to fall on opposite sides
+# of it, which is the whole of the difference between declaring 4% of sites and
+# declaring 84%. Neither number is a count of sites with per-site evidence.
+#
+# `prior_oneside` and `lfsr_uninformative` are in the summary table for this
+# reason. When `prior_oneside` is at or near 1 and `lfsr_uninformative` sits
+# near the threshold, the count is reporting 1 - pi0 and nothing else. On
+# 4_unloading and 5_reloading the prior is genuinely two-sided (a 0.71 and a
+# 0.63 majority side), the uninformative lfsr is 0.80 and 0.69, and the counts
+# mean what they say.
+#
+# The offset that causes this is not something this script can resolve. A shift
+# shared by every probe on the array is either a real global change in
+# methylation at that timepoint or residual technical variation between
+# timepoints, and the two enter the effect estimates identically. It belongs
+# upstream, with the normalization. Re-centring the prior instead
+# (mode = "estimate") is NOT a fix: it drives pi0 to ~1 and makes the lfsr
+# meaningless in the other direction, because once the prior mode sits at -0.03
+# every posterior is confidently negative.
 #
 # Outputs, under the versioned directory set by `out_dir`:
 #
@@ -299,6 +317,26 @@ if (!file.exists(summary_file) && length(shrink_files) > 0) {
       # The offset, carried next to the count it explains.
       mean_est = mean(d$estimate_M),
       pi0 = s$pi0,
+      # The two columns that say whether n_lfsr_05 is measuring evidence or
+      # only the prior, see the header.
+      #
+      # prior_oneside: the share of the non-null prior mass falling on
+      # whichever side is heavier. At 1 the prior has concluded that every
+      # real effect has the same sign.
+      # lfsr_uninformative: what a site with no evidence of its own is given.
+      # Under a fully one-sided prior this equals pi0 exactly, and it is the
+      # floor of the whole lfsr distribution.
+      prior_oneside = {
+        g <- s$fitted_g
+        mid <- (g$a + g$b) / 2
+        neg <- sum(g$pi[mid < 0])
+        pos <- sum(g$pi[mid > 0])
+        if (neg + pos == 0) NA_real_ else max(neg, pos) / (neg + pos)
+      },
+      lfsr_uninformative = {
+        flat <- abs(d$estimate_M / d$se_M) < 0.1
+        if (any(flat)) stats::median(d$lfsr[flat]) else NA_real_
+      },
       n_lfsr_05 = sum(declared),
       # What the shrinkage did to what is reported: the magnitude of the
       # declared effects before and after, in M units.
@@ -330,11 +368,11 @@ if (!file.exists(summary_file) && length(shrink_files) > 0) {
   print(shrinkage_summary[, c(
     "model",
     "term",
-    "n",
     "mean_est",
     "pi0",
+    "prior_oneside",
+    "lfsr_uninformative",
     "n_lfsr_05",
-    "median_abs_est_declared",
     "median_abs_pm_declared"
   )])
 } else if (file.exists(summary_file)) {
