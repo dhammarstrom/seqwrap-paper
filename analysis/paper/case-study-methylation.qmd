@@ -368,7 +368,13 @@ metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
 
 ### Normalization and probe filtering
 
-Functional normalization [@fortin2014] is used because the study design can be expected to result in global methylation differences. Functional normalization removes technical variation captured by the array control probes without assuming a common methylation distribution across samples [@fortin2014]. Probes are then removed if they (1) fail detection in any retained sample, (2) overlap common SNPs at the target CpG or single-base extension site, (3) appear on published lists of cross-reactive EPIC probes (using the [`maxprobes`](https://github.com/markgene/maxprobes/) package), or (iv) map to the sex chromosomes (all male cohort).
+Between-array quantile normalization, as implemented by `minfi::preprocessQuantile()` [@aryee2014], is used. Functional normalization [@fortin2014] was used in an earlier version of this pipeline, on the grounds that the study design can be expected to result in global methylation differences and that functional normalization removes technical variation captured by the array control probes without assuming a common methylation distribution across samples. On these arrays that choice leaves behind a between-array shift that *depends on the methylation level of the position*: low-methylation positions move up and high-methylation positions move down, by up to 0.19 M units between the extreme &beta; strata, which is far larger than the genome-wide mean it averages to. Adaptive shrinkage reads the mean of that shift as signal. `preprocessQuantile()` equalises the marginal distributions across arrays by construction, which removes the level dependence (the between-strata range falls from 0.137--0.188 to 0.031--0.045 M units) and reduces the residual standard deviation by about 10%.
+
+What quantile normalization assumes is worth stating plainly: it does not test whether a genome-wide difference between time-points is real, it assumes there is none and enforces that. A genuine global change would be removed together with the artefact and cannot be recovered downstream. That trade is not decidable from these arrays alone.
+
+Probes are then removed if they (1) fail detection in any retained sample, (2) overlap common SNPs at the target CpG or single-base extension site, (3) appear on published lists of cross-reactive EPIC probes (using the [`maxprobes`](https://github.com/markgene/maxprobes/) package), or (iv) map to the sex chromosomes (all male cohort).
+
+The same pipeline is run by `analysis/R/methylation-case-study-dataprep.R`, which writes the result to `analysis/data/derived_data/seaborne-gset-quantile.RDS`. That file is what the permutation study and the full model run below are fitted on, and it is named for its normalization so that results computed under the two normalizations cannot be mixed silently.
 
 ```{r}
 #| label: normalise-filter
@@ -376,8 +382,27 @@ Functional normalization [@fortin2014] is used because the study design can be e
 
 
 
-# Functional normalization
-gset <- minfi::preprocessFunnorm(rgset, ratioConvert = FALSE)
+# Between-array quantile normalization.
+#
+# NOTE THE RETURN CLASS. preprocessFunnorm(ratioConvert = FALSE) returned a
+# GenomicMethylSet, which still carries the methylated and unmethylated
+# intensities, so beta could be asked for as getBeta(gset, offset = 100).
+# preprocessQuantile() returns a GenomicRatioSet built as
+# GenomicRatioSet(Beta = NULL, M = log2(Meth / Unmeth)): there are no
+# intensities in it and no offset anywhere, and getBeta() on such an object
+# derives beta from M by the inverse logit and SILENTLY IGNORES `offset`.
+# Everything downstream therefore derives beta from M explicitly.
+gset <- minfi::preprocessQuantile(
+  rgset,
+  fixOutliers = TRUE,
+  quantileNormalize = TRUE,
+  stratified = TRUE,
+  # All samples are male and the sex chromosomes are dropped below, so the sex
+  # prediction this would otherwise run has nothing to decide.
+  sex = rep("M", ncol(rgset))
+)
+
+stopifnot(is(gset, "GenomicRatioSet"))
 
 # Initial number of probes
 nprobes_init <- dim(gset)[1]
@@ -406,8 +431,34 @@ gset <- gset[!anno$chr %in% c("chrX", "chrY"), ]
 
 nprobes_final <- dim(gset)[1]
 
+# The check the beta arm depends on. M is what a GenomicRatioSet stores; beta
+# is the inverse logit of it, which is inside the OPEN interval (0, 1) for
+# every finite M. This is what replaces the guarantee the Illumina offset used
+# to provide, and it is asserted rather than assumed: a non-finite M would come
+# from an intensity of exactly zero surviving fixOutliers, and would reach the
+# beta family as a response of exactly 0 or 1, which it cannot take.
+m_check    <- minfi::getM(gset)
+beta_check <- 2^m_check / (1 + 2^m_check)
 
-## Clean up memory 
+stopifnot(all(is.finite(m_check)), all(beta_check > 0 & beta_check < 1))
+
+# The observed distance from the boundary, reported below.
+beta_min <- min(beta_check)
+beta_max <- max(beta_check)
+m_range  <- range(m_check)
+
+rm(m_check, beta_check)
+
+## Raw (unnormalized) intensities for the retained positions.
+#
+# Kept because the quantile-normalized `gset` is a GenomicRatioSet and carries
+# no intensities at all, so getMeth() / getUnmeth() have nothing to return from
+# it. The figure below is about the intensity scale the beta value is defined
+# on, which is a property of the arrays rather than of the normalization.
+mset_raw <- minfi::preprocessRaw(rgset)
+mset_raw <- mset_raw[minfi::featureNames(gset), ]
+
+## Clean up memory
 rm(rgset); gc()
 
 
@@ -423,17 +474,19 @@ An Illumina array detecting methylation values produces arbitrary signals for th
 $$
 \beta_i = \frac{M_i}{M_i+U_i + c}
 $$
-The bias constant c, is added to the denominator to avoid large variations in the &beta; score when probe intensities are low [@bibikova2006]. This value was set to $c = 100$ to achieve regularization of the &beta; values in cases where both M and U were small [@bibikova2006], which is also the default in the `minfi` package when `type = "illumina"`. However, the successful choice of c is noted to depend on the pre-processing of the data (see `?minfi::getBeta`). 
+The bias constant c, is added to the denominator to avoid large variations in the &beta; score when probe intensities are low [@bibikova2006]. A common choice is $c = 100$ [@bibikova2006], which is also the default in the `minfi` package when `type = "illumina"`. However, the successful choice of c is noted to depend on the pre-processing of the data (see `?minfi::getBeta`).
 
-Inspecting the normalized signals representing methylated and unmethylated probes indicate that the constant will only have a minor impact on most sites as both *M* and *U* are >> 100 @fig-raw-data-characteristics A.   
+Inspecting the raw signals representing methylated and unmethylated probes indicates that the constant would only have a minor impact on most sites: the bulk of both *M* and *U* sits well above 100, although a low-intensity shoulder is present (@fig-raw-data-characteristics A), and the choice of c barely moves the distribution of &beta; values (@fig-raw-data-characteristics B).
 
 ```{r}
 #| label: fig-raw-data-characteristics
-#| fig-cap: "Methylated and Unmethylated signals accross samples and a subset of the genomic sites (n = 1000) shows that most signals are well above 100 (A). Calculation of beta; values with different selections of *c* indicate minor differences in the overall distribution of values (B). Both figures have the relative density on the y axis (not shown)"
+#| fig-cap: "Methylated and Unmethylated raw signals accross samples and a subset of the genomic sites (n = 1000) shows that most signals are well above 100 (A). Calculation of beta; values with different selections of *c* indicate minor differences in the overall distribution of values (B). Both figures have the relative density on the y axis (not shown)"
 
-# Extract the methylated and unmethylated signals
-M <- minfi::getMeth(gset)
-U <- minfi::getUnmeth(gset)
+# Extract the methylated and unmethylated signals. These come from the RAW
+# MethylSet, not from `gset`: the quantile-normalized object stores M-values
+# only (see the normalization chunk above).
+M <- minfi::getMeth(mset_raw)
+U <- minfi::getUnmeth(mset_raw)
 
 # Set the number of probes
 n <- 1000
@@ -456,19 +509,23 @@ figa <- data.frame(M)[sites,] |>
                   tibble::rownames_to_column(var = "id") |> 
                   pivot_longer(starts_with("GSM"), values_to = "U")     
       ) |> 
-      pivot_longer(cols = M:U, 
-                   names_to = "signal") |> 
-      ggplot(aes(value, group = paste0(signal,name), 
-                 color = signal)) + 
+      pivot_longer(cols = M:U,
+                   names_to = "signal") |>
+      # The raw intensities include exact zeros, which have no place on the
+      # log axis below. They are dropped explicitly rather than silently by
+      # scale_x_log10().
+      filter(value > 0) |>
+      ggplot(aes(value, group = paste0(signal,name),
+                 color = signal)) +
       geom_line(stat = "density") +
-      scale_x_log10()  + 
+      scale_x_log10()  +
       theme_classic() + 
       theme(axis.title.y = element_blank(), 
             axis.ticks.y = element_blank(), 
             axis.line.y = element_blank(), 
             axis.text.y = element_blank()) + 
-      scale_color_manual(values = colors) + 
-      labs(x = "Normalized signal (AU)", 
+      scale_color_manual(values = colors) +
+      labs(x = "Raw signal (AU)",
            color = "Signal type")
 
 
@@ -511,16 +568,28 @@ figb <- data.frame(M)[sites,] |>
 
 cowplot::plot_grid(figa, figb, ncol = 1)
 
+# Two 770k x 38 intensity matrices, ~470 MB together. invisible() so the gc
+# report does not land in the rendered output after the figure.
+rm(M, U)
+invisible(gc())
+
 ```
 
-We decide to go for the default value of *c* = 100 for the calculation of the &beta; values. 
+The offset is not what protects the &beta; values in this pipeline, however, and it cannot be: `preprocessQuantile()` returns a `GenomicRatioSet` that stores $M = \log_2(\text{Meth}/\text{Unmeth})$ and no intensities at all, so there is nothing left for c to be added to. Passing `offset = 100` to `getBeta()` on such an object is silently ignored, and &beta; is derived from M by the inverse logit,
+
+$$
+\beta_i = \frac{2^{M_i}}{1 + 2^{M_i}}
+$$
+
+which lands in the *open* interval $(0, 1)$ for every finite M. This is the guarantee the beta regression needs, and it is asserted in the chunk above rather than assumed. The observed M-values span `r sprintf("%.2f", m_range[1])` to `r sprintf("%.2f", m_range[2])`, giving &beta; values between `r sprintf("%.3g", beta_min)` and `r sprintf("%.6f", beta_max)`, i.e. `r sprintf("%.3g", beta_min)` and `r sprintf("%.3g", 1 - beta_max)` away from the two boundaries. Everything downstream therefore derives &beta; from M explicitly, and no offset is used anywhere.
+
 &beta;-values are restricted to the 0 to 1 space, and although this is an intuitive metric for understanding the methylation status at a specific genomic site (e.g., as a percentage methylation), it is an inconvenient quantity for a statistical model that expects normally distributed errors [@laird2010; @du2010]. Indeed, when applying a Gaussian model to identify differentially methylated genomic sites, a logit transformation of the &beta;-values results in more favorable diagnostics [@du2010]. The logit transformation of the &beta; values results in M-values. 
 
 $$
 M = \log_2 \left( \frac{\beta}{1-\beta} \right)
 $$
 
-The logit transformation (using a base 2 logarithm) puts the methylation values on a scale with no upper or lower bounds (-ininf;, &ininf;, @fig-beta-mval). This transformation is done on the &beta;-values directly to avoid missing c in the calculation.  
+The logit transformation (using a base 2 logarithm) puts the methylation values on a scale with no upper or lower bounds (-ininf;, &ininf;, @fig-beta-mval). Under quantile normalization the M-value is the quantity the object actually stores, so the relation is read in the other direction here: M is taken from the `gset` and &beta; is derived from it by the inverse logit given above.  
 
 
 ```{r}
@@ -550,7 +619,7 @@ A fixed number of sites is sampled from each &beta;-value stratum. Within every 
 
 We will use the *M-value scale* to add the effect to permuted data with effect assignment *redrawn in every permutation*. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and proportionally to &delta;&times;log(2) for the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization. Our approach differs here from @gadbury2008. We fix the effect sizes while @gadbury2008 uses empirical effect sizes from the data. Our simplified approach enables comparisons between model fitting procedures at known effect sizes and signs across strata of &beta; values.
 
-In the code chunk below, a single site is used to show the workflow. &beta; values are calculated from the `gset` object and transformed to M values. We are using the first row of the M value matrix and join the values with the meta data. Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.3) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both model types are fitted.
+In the code chunk below, a single site is used to show the workflow. M values are taken from the `gset` object and &beta; values are derived from them. We are using a randomly selected row of the M value matrix and join the values with the meta data. Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.3) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both model types are fitted.
 
 We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set. In small samples, linear mixed model parameter p-values from the Wald test are anti-conservative [@luke2017]. When the restricted maximum likelihood (REML) is used in place of maximum likelihood and small sample size-corrections are used (Kenward-Roger or Satterthwaite approximations of degrees of freedom) the type I error rates are controlled at the nominal level [@luke2017]. However, for the generalized linear mixed model (GLMM) with link functions, such as beta regression, the restricted maximum likelihood is not clearly defined [@maestrini2024]. When comparing different REML implementations, @maestrini2024 found that GLMM fitted with REML leads to a reduction in small sample bias and that the use of REML probably should be more widely adopted. The choice of algorithm can be made based on software availability [@maestrini2024]. REML is implemented also for GLMM in the glmmTMB package with the option `REML=TRUE`. For Gaussian models, the results from `glmmTMB` replicates the results of `lme4::lmer`. However, the documentation also says that performance of REML in non-Gaussian models should be verified by simulations (see `?glmmTMB::glmmTMB`).
 
@@ -562,9 +631,13 @@ In addition to REML for mitigation of small sample bias, the Satterthwaite corre
 # Illustrating data preparation and model settings for a set of 
 # candidate models for the methylation data set.
 
-# Prepare data 
-beta_vals <- getBeta(gset, offset = 100)
-m_vals <- log2(beta_vals / (1 - beta_vals))
+# Prepare data.
+#
+# M first, beta derived from it: the quantile-normalized gset stores M and no
+# intensities, so getBeta(gset, offset = 100) would ignore the offset without
+# saying so. This is the same computation, without the false reassurance.
+m_vals <- minfi::getM(gset)
+beta_vals <- 2^m_vals / (1 + 2^m_vals)
 
 # Setting the seed for site selection and time permutation
 set.seed(1)
@@ -587,25 +660,26 @@ dat <- metadata |>
              betasim = plogis(msim * log(2))) 
 
 
-# A general purpose summary function for ML/REML fits
+# A general purpose summary function for ML/REML fits.
+#
+# Two readings of ONE fit, which is the same pair of columns the permutation
+# study records per contrast (see `summary_fun` in
+# analysis/R/methylation-error-permutation.R). An omnibus likelihood ratio test
+# of the time factor was reported here in an earlier version and is dropped: it
+# is not the test a differential methylation analysis reports, it is only ever
+# available on the ML arms because a REML fit has no valid likelihood ratio
+# test of a fixed effect, and it is therefore not among the arms compared
+# below.
 temp_summary_fun <- function(m) {
-      
-      is_reml <- m$modelInfo$REML
-      # LRT p-value
-      if(!is_reml) {
-            lrt_mod <- drop1(m, test = "Chisq")
-            lrt_p <- lrt_mod["time_permute", "Pr(>Chi)"]
-            
-      } else { lrt_p <- NA }
+
       # Wald p-value (restricted to paremeter 3_loading)
       wald_p <- coef(summary(m))$cond["time_permute3_loading", "Pr(>|z|)"]
       # Wald p-value Satterthwaite
       wald_p_satter <- coef(summary(m, ddf = "satterthwaite"))$cond["time_permute3_loading", "Pr(>|t|)"]
-      
-      data.frame(lrt_p = lrt_p, 
-                 wald_p = wald_p, 
+
+      data.frame(wald_p = wald_p,
                  wald_p_satter = wald_p_satter)
-      
+
 }
 
 
@@ -657,12 +731,11 @@ es_betamod <- es_betamod / log(2)
 #| label: tbl-model-comp-illustration
 
 
-out |> 
-            dplyr::select(model,estimator, lrt_p, wald_p, wald_p_satter) |> 
-      gt() |> 
+out |>
+            dplyr::select(model,estimator, wald_p, wald_p_satter) |>
+      gt() |>
 
-      gt::cols_label(lrt_p = md("Likelihood<br>ratio test"), 
-                     wald_p = "Wald z/t-test", 
+      gt::cols_label(wald_p = "Wald z/t-test",
                      wald_p_satter = md("Wald t-test w.<br>Satterthwaite DDF"), 
                      estimator = "Estimator", 
                      model = "Model") 
@@ -675,21 +748,34 @@ out |>
 
 The estimated effects (`r round(es_mmod,2)` and `r round(es_betamod,2)`) for the model on M-values and &beta; values respectively are comparable but will differ due to compression in the &beta; values model.
 
-For the single site used in the illustration above, p-values differs between models (M- vs &beta;-values), estimator (ML vs. REML), and usage of the Satterthwaite's approximation of the degrees of freedom @tbl-model-comp-illustration). The will be the basis of evaluation of the models in the permutation experiment. 
+For the single site used in the illustration above, p-values differs between models (M- vs &beta;-values), estimator (ML vs. REML), and usage of the Satterthwaite's approximation of the degrees of freedom @tbl-model-comp-illustration). The permutation experiment evaluates exactly these cells: four fits crossing scale (&beta; vs M) with estimator (ML vs REML), each read against both reference distributions, giving eight inferential procedures.
 
 In the permutation experiment, the added fixed effect sizes are multiplied by 1 or -1 in a balanced fashion to create the direction of the effect. At an extreme site (&beta;-values close to 0 or 1), adding or subtracting &delta; will either compress towards the boundary or move estimates towards 0.5. Since these scenarios are not equally detectable and the two models disagree about the variance function in extreme regions, we can evaluate the effect of selecting one model over the other also for the mean estimate.
 
-The source code for the permutation experiment can be run in full using the script `analysis/R/methylation-error-permutation.R`. Below we check if files are available from a previous run, if not the script runs and stores data in `analysis/data/derived_data/permutation/`. 
+The source code for the permutation experiment can be run in full using the script `analysis/R/methylation-error-permutation.R`. Below we check if files are available from a previous run, if not the script runs and stores data in `analysis/data/derived_data/permutation_v4/`.
 
 
 
 ```{r}
 
-# list files in permutation results folder
-# Versioned to match the script: permutation/ holds the earlier two-arm run
-# (beta, m) with the old evaluation column names, permutation_v2/ the
-# four-arm run (beta, beta_reml, m, m_reml_satt).
-out_dir <- here::here("analysis/data/derived_data/permutation_v3")
+# list files in permutation results folder.
+#
+# The directory is VERSIONED to match the script, and the versions are not
+# interchangeable:
+#
+# permutation/    two arms (beta, m), old evaluation column names
+# permutation_v2/ four arms, where the Satterthwaite arm was an lmerTest fit
+#                 on the M scale only
+# permutation_v3/ four glmmTMB arms (beta, beta_reml, m, m_reml) with both
+#                 Wald reference distributions per contrast plus an omnibus
+#                 LRT on the ML arms, on the FUNCTIONALLY normalized arrays
+# permutation_v4/ the same four arms and the same two Wald readings, with the
+#                 omnibus LRT removed and fitted on the QUANTILE normalized
+#                 arrays -- the run read below
+#
+# v3 and v4 cannot be bound together: the evaluation slot of v4 no longer
+# carries the `test`, `df`, `stat` and `pval` columns the LRT was read from.
+out_dir <- here::here("analysis/data/derived_data/permutation_v4")
 perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
 
 if (length(perm_files) == 0) source(
@@ -728,8 +814,9 @@ perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
 # permuted labels. `spike_time` is set to 3_loading and
 # 1_baseline is the reference level.
 
-# alt_terms also accepts and omnibus test (not used here)
-# Instead, the omnibus test is saved per target in the eval slot.
+# One contrast: the added effect shifts the samples labelled `spike_time` only,
+# so this is the single term that carries a true alternative. Every other time
+# contrast is a null even at a spiked site.
 alt_terms <- c(paste0("time_permute", spike_time))
 
 # Attach the per-iteration effects (delta, sign, stratum) to every test.
@@ -761,12 +848,9 @@ pvals_wald <- perm_summaries |>
                 failed_p = sum(is.na(p_wald)), 
                 failed_satt = sum(is.na(p_satt)))
 
-# Sort out number of p-values (LR test)
-pvals_lrt <- perm_evals |> 
-      summarise(.by = model, 
-                n_models_lrt = n(), 
-                failed_lrt = sum(is.na(pval))) |> 
-      mutate(failed_lrt = if_else(grepl("_reml", model), NA, failed_lrt)) 
+# There is no LRT column to count in v4: the evaluation slot carries the
+# convergence diagnostics only (see the version notes at `out_dir` above), so
+# the failure counts below are the two Wald readings and nothing else.
 
 
 
@@ -776,13 +860,12 @@ perm_evals |>
                        n_fail     = sum(convergence != 0),
                        prop_fail  = mean(convergence != 0)) |> 
       inner_join(pvals_wald) |> 
-      inner_join(pvals_lrt) |> 
       
       mutate(estimator = if_else(grepl("_reml", model), "REML", "ML"), 
              model = gsub("_reml", "", model), 
              model = if_else(model == "beta", "&beta;", "M")) |> 
       dplyr::select(model, estimator, n_fits, n_fail, n_coefs_wald, failed_p, 
-                    failed_satt, n_models_lrt, failed_lrt) |> 
+                    failed_satt) |> 
       gt() |> 
       gt::cols_label(model = "Model", 
                      estimator = "Estimator", 
@@ -790,9 +873,7 @@ perm_evals |>
                      n_fail = "Failed fits", 
                      n_coefs_wald = md("Number of <br>parameter values"), 
                      failed_p = md("Number of failed <br>Wald p-values"), 
-                     failed_satt = md("Number of <br>failed Satterthwaite p-values"), 
-                     n_models_lrt = md("Number of models<br>evaluated for LRT"), 
-                     failed_lrt = "Failed LRT p-values") |> 
+                     failed_satt = md("Number of <br>failed Satterthwaite p-values")) |> 
       fmt_markdown(columns = "model")
       
 ```
@@ -849,21 +930,27 @@ The type I error rates are estimated from sites and parameter estimates without 
 ```{r}
 #| label: fig-permutation-type1
 #| eval: true
-#| fig-cap: "Among true null effects p-value distributions indicated miscalibrated p-values from LR-test, the uncorrected Wald procedure and maximum likelihood fits (A). Conversely, p-value distributions from REML fits with the Satterthwaite DDF correction displayed a uniform distribution. Calculating the type I error rate indicated that the type I error rate was close to the nominal 5% rate for p-values from REML fits calculated with the Satterthwaite DDF across all strata of &beta; values (B)."
+#| fig-cap: "Among true null effects p-value distributions indicated miscalibrated p-values from the uncorrected Wald procedure and from maximum likelihood fits (A). Conversely, p-value distributions from REML fits with the Satterthwaite DDF correction displayed a uniform distribution. Calculating the type I error rate indicated that the type I error rate was close to the nominal 5% rate for p-values from REML fits calculated with the Satterthwaite DDF across all strata of &beta; values (B)."
 
 
-# This figure extracts the &beta; values and shows the strata 
-# used in  the permutation study. 
+# This figure extracts the &beta; values and shows the strata
+# used in  the permutation study.
 
 # Extract the beta values  ##############
 
-# Reloading gset to make code chunk independent of above
+# Reloading gset to make code chunk independent of above. This is the same
+# quantile-normalized object the permutation study was fitted on; the strata
+# drawn below are the strata the results are read in.
 gset <- readRDS(
-  here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
+  here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
 )
 
-# Extract beta values
-B <- minfi::getBeta(gset, offset = 100)
+# Beta derived from M, not getBeta(offset = 100): the GenomicRatioSet holds no
+# intensities and would ignore the offset silently. M is materialised once --
+# it is a 10^2 MB matrix.
+Mmat <- minfi::getM(gset)
+B <- 2^Mmat / (1 + 2^Mmat)
+rm(Mmat)
 
 # Pre-compute densities and save in data frame
 d <- density(rowMeans(B), from = 0, to = 1)
@@ -912,23 +999,13 @@ null_dat <- perm_dat |>
       filter(!is.na(p_satt))
 
       # Alternative, keep only all nulls
-      # filter(delta == 0) 
-     
-# Collect LRT test statistics
-lrt_null <- perm_evals |> 
-      filter(convergence == 0) |> 
-       dplyr::inner_join(perm_designs,
-                        by = c("iter", "target" = "id")) |> 
-      filter(delta == 0) |> 
-      
-      # fail safe if mssing p-vals from larger 
-      # simulation
-      filter(!is.na(pval)) |> 
-      mutate(Estimator = "ML", 
-             Model = if_else(model == "beta", "&beta;", "M"), 
-             Type = "LRT") |> 
-      dplyr::select(Model, Type, Estimator, pval) 
+      # filter(delta == 0)
 
+# The omnibus LRT that earlier versions collected here from the evaluation
+# slot is not part of v4 (see the version notes at `out_dir` above): the
+# evaluation slot carries convergence diagnostics only, and the eight
+# inferential cells are the four arms read against the two Wald reference
+# distributions.
 
 # A histogram option for the p-value distribution
 
@@ -944,10 +1021,9 @@ fig2 <- null_dat |>
              Model = if_else(model == "beta", "&beta;", "M"), 
              Type = if_else(type == "p_satt", "Satterthwaite DDF", 
                             "Wald p-values")) |> 
-      filter(!is.na(pval)) |> 
-      dplyr::select(Model, Type, Estimator, pval) |> 
-      bind_rows(lrt_null) |> 
-      ggplot(aes(pval)) + 
+      filter(!is.na(pval)) |>
+      dplyr::select(Model, Type, Estimator, pval) |>
+      ggplot(aes(pval)) +
       geom_histogram(aes(y = after_stat(density)),
                      boundary = 0) + 
       facet_wrap(Model ~ Estimator + Type, labeller = label_both)  + 
@@ -967,28 +1043,13 @@ fig2 <- null_dat |>
 
 
 s1 <- null_dat |>
-      filter(convergence == 0) |> 
-      dplyr::select(model, iter, betacat, delta, 
-                    target, term, p_wald, p_satt) |> 
-      pivot_longer(cols = p_wald:p_satt, 
-                   names_to = "type", 
-                   values_to = "pval") |> 
-      
-      bind_rows(
-           perm_evals |> 
-             filter(convergence == 0) |> 
-      # fail safe if mssing p-vals from larger 
-      # simulation
-            filter(!is.na(pval)) |> 
-            dplyr::inner_join(perm_designs,
-                        by = c("iter", "target" = "id")) |> 
-            filter(delta == 0) |> 
-            mutate(term = "Omnibus", 
-                   type = "LRT") |> 
-            
-      dplyr::select(model, iter, betacat, delta, target, term, type, 
-                    pval)) |> 
-      filter(!is.na(pval)) |> 
+      filter(convergence == 0) |>
+      dplyr::select(model, iter, betacat, delta,
+                    target, term, p_wald, p_satt) |>
+      pivot_longer(cols = p_wald:p_satt,
+                   names_to = "type",
+                   values_to = "pval") |>
+      filter(!is.na(pval)) |>
 
       dplyr::summarise(.by = c(model, betacat, iter, term, type),
                      n = dplyr::n(), 
@@ -1050,11 +1111,10 @@ fig3 <- model_error_type1_betacat |>
                                    beta_reml   = "&beta;<sub>REML</sub>",
                                    m           = "M<sub>ML</sub>",
                                    m_reml      = "M<sub>REML</sub>"), 
-             type = dplyr::recode(type, 
-                                  p_wald = "Wald p-values", 
-                                  p_satt = "Satterthwaite DDF", 
-                                  LRT = "Omnibus LRT")) |> 
-      
+             type = dplyr::recode(type,
+                                  p_wald = "Wald p-values",
+                                  p_satt = "Satterthwaite DDF")) |>
+
       
       ggplot(aes(model,  100 * m.error, shape = type, 
                  fill = type))  +
@@ -1075,9 +1135,9 @@ fig3 <- model_error_type1_betacat |>
             legend.position = "bottom", 
             legend.title = element_blank())  +
       
-      scale_shape_manual(values = c(21, 24, 23)) + 
+      scale_shape_manual(values = c(21, 24)) +
       scale_fill_manual(values = colors) +
-      scale_y_continuous(breaks = c(0, 5, 7.5, 10), 
+      scale_y_continuous(breaks = c(0, 5, 7.5, 10),
                          limits = c(0, 10), 
                          expand = c(0,0)) +
       labs(x = "Model", 
@@ -1127,30 +1187,19 @@ crit_value <- function(p, alpha) {
       p[k]
 }
 
-# One row per (model, test type, iteration, site). We use the wald-type 
-# contrasts and the data from the LRT test (ML only).
+# One row per (model, test type, iteration, site), on the spiked contrast. The
+# two test types are the two Wald reference distributions the permutation run
+# records per contrast; the omnibus LRT that earlier versions added from the
+# evaluation slot is not part of v4.
 #
-# `is_alt` is ground truth. These are the sites with added effect. 
-power_dat <- dplyr::bind_rows(
-
-      perm_dat |>
-            dplyr::filter(convergence == 0, term %in% alt_terms) |>
-            dplyr::select(model, iter, target, betacat, delta, delta_abs,
-                          estimate, p_wald, p_satt) |>
-            tidyr::pivot_longer(cols = c(p_wald, p_satt),
-                                names_to = "type",
-                                values_to = "pval"),
-
-      perm_evals |>
-            dplyr::filter(convergence == 0) |>
-            # The REML arms carry no LRT (see eval_fun in the permutation
-            # script), and arrive here as NA rather than as absent rows.
-            dplyr::filter(!is.na(pval)) |>
-            dplyr::inner_join(perm_designs,
-                              by = c("iter", "target" = "id")) |>
-            dplyr::mutate(type = "LRT", estimate = NA_real_) |>
-            dplyr::select(model, iter, target, betacat, delta, delta_abs,
-                          estimate, type, pval)) |>
+# `is_alt` is ground truth. These are the sites with added effect.
+power_dat <- perm_dat |>
+      dplyr::filter(convergence == 0, term %in% alt_terms) |>
+      dplyr::select(model, iter, target, betacat, delta, delta_abs,
+                    estimate, p_wald, p_satt) |>
+      tidyr::pivot_longer(cols = c(p_wald, p_satt),
+                          names_to = "type",
+                          values_to = "pval") |>
 
       # Applied to nulls and alternatives together: dropping the Satterthwaite
       # failures from one side only would change which sites a cell is scored
@@ -1159,7 +1208,7 @@ power_dat <- dplyr::bind_rows(
       dplyr::mutate(is_alt = delta != 0,
                     sgn = sign(delta),
                     model = factor(model),
-                    type = factor(type, levels = c("p_wald", "p_satt", "LRT")))
+                    type = factor(type, levels = c("p_wald", "p_satt")))
 
 stopifnot(any(power_dat$is_alt), any(!power_dat$is_alt))
 
@@ -1265,9 +1314,8 @@ lab_model <- function(x) {
 lab_type <- function(x) {
       factor(dplyr::recode(as.character(x),
                            p_wald = "Wald p-values",
-                           p_satt = "Satterthwaite DDF",
-                           LRT    = "Omnibus LRT"),
-             levels = c("Wald p-values", "Satterthwaite DDF", "Omnibus LRT"))
+                           p_satt = "Satterthwaite DDF"),
+             levels = c("Wald p-values", "Satterthwaite DDF"))
 }
 
 lab_betacat <- function(x) {
@@ -1450,14 +1498,15 @@ A rejection in the wrong direction is not a detection. Since the sign of the add
 #| eval: true
 
 # Sign-discordant rejections (type S, @gelman2014) among the size-adjusted
-# rejections. The omnibus LRT is excluded: it has no signed estimate.
+# rejections. Every cell carries a signed estimate, so no test type has to be
+# excluded here.
 #
 # Rates are formed from POOLED counts rather than as the mean of per-iteration
 # rates. A cell with no rejections in a given permutation has no rate to
 # average, so averaging silently drops that permutation and weights the result
 # towards the permutations that rejected most.
 sign_rejections <- power_dat |>
-      dplyr::filter(is_alt, type != "LRT") |>
+      dplyr::filter(is_alt) |>
 
       dplyr::filter(pval < 0.05) |>
       dplyr::mutate(discordant = sign(estimate) != sgn)
@@ -1800,7 +1849,7 @@ The exaggeration ratio is largest for the smallest effects, reaching `r sprintf(
 ```{r}
 
 # The annotation file
-gset <- readRDS(here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS"))
+gset <- readRDS(here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS"))
 anno <- minfi::getAnnotation(gset)
 nsites <- nrow(anno)
 
@@ -1811,26 +1860,37 @@ The unfiltered Illumina EPIC data has over 800 000 CpG positions. After filterin
 
 ### Loading the full model results
 
-The four arms are fitted by `analysis/R/methylation-case-full.R`, which writes one file per arm to `analysis/data/derived_data/full_v2/` together with a small timing sidecar. The arms are the same four as in the permutation study above, read with the same two Wald reference distributions per contrast; the omnibus LRT is not part of the full run.
+The full run fits the two REML arms only, and it is `analysis/R/methylation-case-full.R` that fits them, writing one file per arm to `analysis/data/derived_data/full_v3/` together with a small timing sidecar. They are read with the same two Wald reference distributions per contrast as in the permutation study; the omnibus LRT is not part of the full run.
+
+The ML arms are deliberately absent. The permutation study is what compares the estimators, and it found the REML arms to be the ones that hold their nominal size (@fig-permutation-type1) while the size-adjusted power is indistinguishable between all four (@tbl-power-calibration). Refitting the ML arms over every position would spend a further seven hours reproducing an estimator that has already been rejected, at a hundredth of the resolution the permutation gives the comparison.
 
 ```{r}
 #| label: full-model-import
 #| eval: true
 
 # The results directory is VERSIONED in the same way as the permutation
-# directory: full_v2/ holds the four-arm run (beta, beta_reml, m, m_reml)
-# with `p_wald` and `p_satt` per contrast, the latter on the REML arms only.
-# The earlier two-arm files in the derived_data root (beta-model-full.RDS,
-# m-model-full.RDS) carry a different summary schema and are superseded by it.
-full_dir   <- here::here("analysis/data/derived_data/full_v2")
-full_arms  <- c("beta", "beta_reml", "m", "m_reml")
+# directory, and for the same reason:
+#
+# (derived_data root)  two arms written as beta-model-full.RDS and
+#                      m-model-full.RDS, a single `p.value` column
+# full_v2/             four glmmTMB arms (beta, beta_reml, m, m_reml) with
+#                      `p_wald` and `p_satt` per contrast, on the FUNCTIONALLY
+#                      normalized arrays
+# full_v3/             the two REML arms only, same two Wald readings, on the
+#                      QUANTILE normalized arrays -- the run read below
+#
+# full_v2 and full_v3 are not comparable position by position and must not be
+# pooled: they were fitted on differently normalized values (see the
+# normalization section above).
+full_dir   <- here::here("analysis/data/derived_data/full_v3")
+full_arms  <- c("beta_reml", "m_reml")
 full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
 
 # Unlike the permutation study, a missing file is NOT refitted on the fly: the
-# four arms together are close to a day of wall-clock time (see the timings
-# reported below), so what is missing is reported instead.
+# two arms together are close to twenty hours of wall-clock time (see the
+# timings reported below), so what is missing is reported instead.
 if (!all(file.exists(full_files)))
-      stop("missing arm files in full_v2/: ",
+      stop("missing arm files in full_v3/: ",
            paste(basename(full_files[!file.exists(full_files)]),
                  collapse = ", "),
            ". Run analysis/R/methylation-case-full.R first.",
@@ -1844,7 +1904,7 @@ full_keep_terms <- NULL
 
 # One arm at a time. Each arm object is on the order of 10^2 MB, so the
 # per-fit diagnostics are joined on WITHIN the arm and the arm is dropped
-# before the next one is read, rather than binding four whole arms and joining
+# before the next one is read, rather than binding both whole arms and joining
 # afterwards.
 read_full_arm <- function(file) {
 
@@ -1915,12 +1975,14 @@ gc()
 
 # `reml` in the evaluation slot is read off the fit object, not off the arm
 # name (see eval_fun in the script), so this is the check that the arm
-# labelling agrees with what was actually estimated. The arms are also all
+# labelling agrees with what was actually estimated. Every arm here claims to
+# be REML, so the check is that every fit actually was. The arms are also both
 # fitted on the same set of sites, which is what makes them comparable
 # site-by-site.
 stopifnot(
       setequal(as.character(full_evals$model), full_arms),
-      all(full_evals$reml == grepl("_reml$", as.character(full_evals$model))),
+      all(grepl("_reml$", full_arms)),
+      all(full_evals$reml),
       length(unique(full_meta$k)) == 1L,
       length(unique(full_meta$n)) == 1L)
 
@@ -1939,7 +2001,7 @@ full_timing <- readRDS(file.path(full_dir, "timing.RDS"))
 
 ```
 
-The full run fitted `r n_full_sites` positions in `r n_full_samples` samples per arm, giving `r nrow(full_dat)` estimated parameters across the four arms and `r length(full_terms)` contrasts against baseline (`r paste(full_terms, collapse = ", ")`).
+The full run fitted `r n_full_sites` positions in `r n_full_samples` samples per arm, giving `r nrow(full_dat)` estimated parameters across the `r length(full_arms)` arms and `r length(full_terms)` contrasts against baseline (`r paste(full_terms, collapse = ", ")`).
 
 
 #### Effect estimates in the full data
@@ -1947,25 +2009,27 @@ The full run fitted `r n_full_sites` positions in `r n_full_samples` samples per
 ```{r}
 
 
+# Both arms here are REML and both are read with Satterthwaite, so the
+# `estimator == "REML"` filters that the four-arm version of this section
+# carried are gone: there is nothing left to select against.
+
 # Number of convergence fails
-full_dat |> 
-      filter(convergence != 0) |> 
-      distinct(target, model) |> 
+full_dat |>
+      filter(convergence != 0) |>
+      distinct(target, model) |>
       print()
-      
+
 
 # Number of ddf fails
 full_dat |>
-      filter(estimator == "REML") |> 
-      filter(is.na(ddf)) |> 
-      distinct(target, model) |> 
+      filter(is.na(ddf)) |>
+      distinct(target, model) |>
       print()
 
 
 res <- full_dat |>
-      filter(estimator == "REML") |> 
-      filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |> 
-      mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate)) 
+      filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |>
+      mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate))
   
 
 
@@ -2027,9 +2091,9 @@ full_dat |>
 
 ### Computational time
 
-The four arms were fitted one `seqwrap()` call at a time, and the elapsed time of each call is recorded in the timing sidecar written alongside the results (@tbl-timing-full). That says what this run cost. It does not say what the cost is a *function* of, which is the question anyone sizing a different design has to answer, and it cannot be read off a single number per arm.
+The arms were fitted one `seqwrap()` call at a time, and the elapsed time of each call is recorded in the timing sidecar written alongside the results (@tbl-timing-full). That says what this run cost. It does not say what the cost is a *function* of, which is the question anyone sizing a different design has to answer, and it cannot be read off a single number per arm.
 
-`analysis/R/methylation-timing-experiment.R` answers it by timing the same four arms on sub-samples of the same data, varying one thing at a time: the number of targets ($k$), the model, and the number of arrays. Everything inside the timed region is what the full run did --- same data, same `arguments`, same `summary_fun` (the Satterthwaite denominator df is a real cost and is paid here too), same `eval_fun`, same `return_models = FALSE`, same core count --- so the fitted intercept and slope are in the units of the full run rather than in units of a benchmark. Cells are run in a randomised order, and a fixed anchor cell is re-run throughout to detect any drift in machine speed over the two hours the experiment takes.
+`analysis/R/methylation-timing-experiment.R` answers it by timing all four arms of the permutation study --- including the two ML arms the full run does not fit, so that the estimator can be priced --- on sub-samples of the same data, varying one thing at a time: the number of targets ($k$), the model, and the number of arrays. Everything inside the timed region is what the full run did --- same data, same `arguments`, same `summary_fun` (the Satterthwaite denominator df is a real cost and is paid here too), same `eval_fun`, same `return_models = FALSE`, same core count --- so the fitted intercept and slope are in the units of the full run rather than in units of a benchmark. Cells are run in a randomised order, and a fixed anchor cell is re-run throughout to detect any drift in machine speed over the two hours the experiment takes.
 
 ```{r}
 #| label: reading-timing
@@ -2109,6 +2173,13 @@ timing_fit <- timing_size |>
 
 # The scaling and extrapolation tables, joined on the arm and put in the
 # labelling used everywhere else in this document.
+#
+# `observed_h` in the extrapolation slot is the timing experiment's own record
+# of what the full run took, and it covers all FOUR arms -- the two ML arms
+# have no counterpart in full_v3, so it is the four-arm run (full_v2) that is
+# being predicted here. That is the right target for this table: it prices the
+# estimator, which is what needs a fitted ML arm to price against. It is NOT
+# @tbl-timing-full, which reports the two arms this analysis is read from.
 timing_tab <- timing_scaling$scaling |>
       dplyr::select(arm, scale, estimator, overhead_s, per_target_s) |>
       dplyr::inner_join(timing_fit, by = "arm") |>
@@ -2235,7 +2306,7 @@ timing_tab |>
 
 Two readings say that the cost is linear in the number of targets. The linear fit accounts for `r sprintf("%.1f", 100 * min(timing_tab$r2))`% or more of the variance in every arm, and the exponent $c$ in elapsed $= a + b k^{c}$ is within sampling error of one in three of the four arms. It is not in `r lab_model("m_reml")`, where $c$ = `r sprintf("%.2f", timing_tab$exponent[timing_tab$arm == "m_reml"])` and a quadratic term is significant, so a slight super-linearity is detectable within the range measured. It does not persist: the chunk size `seqwrap()` chooses is itself a function of $k$ and the core count, so parallel granularity changes across the small-$k$ end of the size block in a way it does not change between there and the full run.
 
-The check that decides whether any of this describes the full run is the extrapolation. Predicting from cells of at most `r format(timing_k_max, big.mark = " ")` targets to the `r format(unique(timing_tab$k_full), big.mark = " ")` the full run fitted is an extrapolation of `r sprintf("%.0f", timing_extrap_factor)`-fold, and nothing in the fit protects it. The predictions come out between `r sprintf("%.1f", min(timing_tab$error_pct))`% and `r sprintf("%+.1f", max(timing_tab$error_pct))`% of the observed times (@tbl-timing-scaling). A cost that grew faster than $k$ would not survive that, and neither would the `r sprintf("%.2f", timing_tab$exponent[timing_tab$arm == "m_reml"])` exponent if it were a property of the algorithm rather than of the range it was measured over.
+The check that decides whether any of this describes the full run is the extrapolation. Predicting from cells of at most `r format(timing_k_max, big.mark = " ")` targets to the `r format(unique(timing_tab$k_full), big.mark = " ")` the full run fitted is an extrapolation of `r sprintf("%.0f", timing_extrap_factor)`-fold, and nothing in the fit protects it. The predictions come out between `r sprintf("%.1f", min(timing_tab$error_pct))`% and `r sprintf("%+.1f", max(timing_tab$error_pct))`% of the observed times (@tbl-timing-scaling). The observed times there are those of the earlier four-arm run, which is the only run that fitted the ML arms and therefore the only one the estimator comparison can be checked against; the two REML arms of the run analysed here (@tbl-timing-full) took `r sprintf("%.2f", min(full_timing$hours))` and `r sprintf("%.2f", max(full_timing$hours))` hours, within the same margin. A cost that grew faster than $k$ would not survive that, and neither would the `r sprintf("%.2f", timing_tab$exponent[timing_tab$arm == "m_reml"])` exponent if it were a property of the algorithm rather than of the range it was measured over.
 
 What the marginal cost is made of can then be read from the two blocks that hold $k$ fixed and vary the model and the sample size instead (@tbl-timing-marginal). Both blocks report elapsed time divided by $k$, which still carries the per-call overhead amortised over the targets --- about `r sprintf("%.0f", 1000 * mean(timing_overhead) / k_complexity)` ms of it at $k$ = `r format(k_complexity, big.mark = " ")`, identically in every row --- so the overhead is subtracted before the rows are compared. The subtraction is checked against something it has to reproduce: rung 3 of the complexity ladder is the full run's own model, and its marginal cost agrees with the slope the size block measured independently for the same arm to within `r sprintf("%.0f", max(abs(timing_rung3$diff_pct)))`%.
 
@@ -2391,7 +2462,7 @@ cowplot::plot_grid(time1, time2, rel_widths = c(1, 0.5))
 
 ### Comparison with the published results
 
-The supplementary tables of @seaborne2018 list the positions the original analysis called differentially methylated, one sheet per contrast against baseline, in `analysis/data/resource_data/seaborne2018-suppl.xlsx`. They are read here and compared with the four arms fitted above on the same deposited arrays.
+The supplementary tables of @seaborne2018 list the positions the original analysis called differentially methylated, one sheet per contrast against baseline, in `analysis/data/resource_data/seaborne2018-suppl.xlsx`. They are read here and compared with the two arms fitted above on the same deposited arrays.
 
 The purpose of the comparison is not to audit the original study. It is to show what a calibrated per-position test returns on a real data set of this size, and how far that is from what an uncorrected threshold on a test that ignores the repeated-measures structure returns on the same arrays. The size of the two data sets is identical; only the procedure differs, and the permutation study above is what says which of the two procedures holds its nominal error rate.
 
@@ -2484,7 +2555,7 @@ The p-values in the supplement are reproduced to `r sprintf("%.1e", max(sup_p_ch
 ```{r}
 #| label: tbl-seaborne-counts
 #| eval: true
-#| tbl-cap: "Positions called differentially methylated against baseline. The published column is the supplementary table of Seaborne et al., an uncorrected threshold on a two-group test; the remaining columns are the four arms fitted here on the same arrays, at the same uncorrected threshold and after Benjamini-Hochberg correction across all positions within a contrast. The Satterthwaite reference distribution is used where the arm provides one."
+#| tbl-cap: "Positions called differentially methylated against baseline. The published column is the supplementary table of Seaborne et al., an uncorrected threshold on a two-group test; the remaining columns are the arms fitted here on the same arrays, at the same uncorrected threshold and after Benjamini-Hochberg correction across all positions within a contrast. Both arms are read against the Satterthwaite reference distribution."
 
 # Counts are formed with p.adjust() inside the summary rather than as a column
 # on full_dat: the adjustment is over all positions within a contrast, and
@@ -2522,19 +2593,20 @@ full_counts |>
                                                "FDR < 0.05")) |>
       dplyr::relocate(Published, .after = Threshold) |>
       gt(groupname_col = "Contrast") |>
-      gt::cols_label(beta = md("&beta;<sub>ML</sub>"),
-                     beta_reml = md("&beta;<sub>REML</sub>"),
-                     m = md("M<sub>ML</sub>"),
-                     m_reml = md("M<sub>REML</sub>")) |>
+      # Addressed through `full_arms` rather than by naming the columns, so
+      # that changing which arms the full run fits does not leave this table
+      # referring to a column that is no longer there.
+      gt::cols_label_with(columns = dplyr::any_of(full_arms),
+                          fn = function(x) md(lab_model(x))) |>
       gt::tab_spanner(label = "This analysis",
-                      columns = c(beta, beta_reml, m, m_reml)) |>
-      fmt_number(columns = c(Published, beta, beta_reml, m, m_reml),
+                      columns = dplyr::any_of(full_arms)) |>
+      fmt_number(columns = dplyr::any_of(c("Published", full_arms)),
                  decimals = 0) |>
       sub_missing(missing_text = "--")
 
 ```
 
-At the threshold the original analysis used, our arms return the same order of magnitude of positions as the published lists: tens of thousands per contrast out of `r format(n_full_sites, big.mark = " ")`. That is what an uncorrected 5% threshold returns whether or not anything is there. After correcting for the number of positions tested, the four arms return at most a few hundred positions, and the two arms the permutation study found to hold their nominal size -- REML with Satterthwaite denominator degrees of freedom -- return none at all.
+At the threshold the original analysis used, our arms return the same order of magnitude of positions as the published lists: tens of thousands per contrast out of `r format(n_full_sites, big.mark = " ")`. That is what an uncorrected 5% threshold returns whether or not anything is there. After correcting for the number of positions tested, neither arm returns a single position on any contrast -- and these are the two arms the permutation study found to hold their nominal size, REML with Satterthwaite denominator degrees of freedom, so the empty list is not the result of a conservative test.
 
 #### Which positions
 
@@ -2617,7 +2689,10 @@ This is not a disagreement between the two models. It survives fitting the publi
 # as independent, which is the test the 1 and 14 df identify. If the published
 # statistics are recoverable from these arrays at all, this is what recovers
 # them.
-beta_vals <- minfi::getBeta(gset, offset = 100)
+# Beta derived from M, as everywhere else: the quantile-normalized gset holds
+# no intensities and getBeta() would ignore an offset silently.
+beta_vals <- minfi::getM(gset)
+beta_vals <- 2^beta_vals / (1 + 2^beta_vals)
 meta_full <- meta_full[match(colnames(beta_vals), meta_full$geo_accession), ]
 
 two_group <- function(mat, i1, i2) {
@@ -2718,8 +2793,10 @@ dir_ours |>
 
 ```
 
-The ordering across the three contrasts is the opposite of the published one (@tbl-seaborne-direction). Here hypomethylation is most pronounced after loading and least pronounced after reloading, and the same ordering appears across all positions rather than only the called ones: the median change from baseline over the whole array is negative after loading and positive after reloading.
+Across all positions there is essentially no net direction here: between `r sprintf("%.1f", 100 * min(dir_ours$all_hypo))`% and `r sprintf("%.1f", 100 * max(dir_ours$all_hypo))`% of positions are hypomethylated relative to baseline on every contrast and in both arms (@tbl-seaborne-direction). That is not a finding, it is the normalization: `preprocessQuantile()` equalises the marginal distribution of every array by construction, so a genome-wide imbalance cannot survive it and cannot be read off these fits (see the normalization section above). Under the earlier functional normalization the same table spanned 47.6% to 59.9% across the three contrasts, a fifteen-fold wider spread, and that contrast-dependent imbalance is the level-dependent artefact which motivated the change.
 
-That ordering is, however, a property of the normalization rather than of the model. @seaborne2018 normalized with SWAN, a within-array method, where the pipeline used here (`analysis/R/methylation-case-study-dataprep.R`) uses functional normalization, which additionally removes between-array variation using the control probes. `analysis/R/methylation-normalization-check.R` repeats the filtering and the M<sub>REML</sub> fits on a subset under both, and the two disagree on exactly this point: under SWAN hypomethylation predominates at every time point and is most pronounced after reloading, the published ordering, and under functional normalization it is most pronounced after loading and reloading tips to net hypermethylation. The positions each returns differ correspondingly, with about half of an uncorrected 5% list specific to the normalization.
+Among the positions placed below an uncorrected 0.05 there is a slight imbalance, and it points the same way as the published one on the contrast the published claim rests on: reloading is the only contrast on which hypomethylation predominates (`r sprintf("%.1f", 100 * max(dir_ours$sig_hypo))`%), where loading and unloading sit just below half. It is far weaker than the published `r sprintf("%.0f", 100 * max(sup_n$hypo / sup_n$n_sup))`% for reloading, the two contrasts below it are ordered the other way round from the published lists, and the whole thing is read off `r format(max(dir_ours$n_sig), big.mark = " ")` positions that an uncorrected threshold would return from noise alone. It is an agreement about which contrast, not a replication.
 
-A direction shared by the majority of several hundred thousand positions, and reversible by a change of normalization, is a property of the arrays rather than of a set of positions, and neither ordering should be read as a methylation signature on its own. What does not depend on the normalization is the multiplicity: no position survives correction under either, in either the models fitted here or the test the original analysis used.
+How much of any such ordering is a property of the normalization rather than of the biology is what `analysis/R/methylation-normalization-check.R` measures. It repeats the filtering and the M<sub>REML</sub> fits on a subset under SWAN, the within-array method @seaborne2018 used, and under functional normalization, and the two disagree on exactly this point: under SWAN hypomethylation predominates at every time point and is most pronounced after reloading, and under functional normalization it is most pronounced after loading and reloading tips to net hypermethylation. About half of an uncorrected 5% list is specific to the normalization. That check has not been re-run under quantile normalization, but its point does not depend on which pair is compared: a direction shared by the majority of several hundred thousand positions and reversible by a change of normalization is a property of the arrays rather than of a set of positions, and no ordering should be read as a methylation signature on its own.
+
+What does not depend on the normalization is the multiplicity: no position survives correction under any of them, in either the models fitted here or the test the original analysis used.

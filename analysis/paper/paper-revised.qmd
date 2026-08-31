@@ -131,21 +131,21 @@ After iterating over the data set, `seqwrap` displays a compact summary of any e
 
 ### Data pre-processing
 
-[Prior to model fitting, the high-dimensional `data` and sample metadata must be prepared. The `data` can either be a data frame or a list of data frames. In the single data frame format, each row should correspond to a target (e.g., a gene, exon, protein) and each column correspond to a sample. Importantly, the user must ensure that any required pre-processing steps are carried out before modelling as seqwrap does not include pre-processing functionality. Pre-processing, such as quality control, filtering, normalization or transformations, depending on the nature of the data, must therefore be done using appropriate tools such as, e.g., `edgeR` for library size calculations in an RNA-seq workflow [@robinson2010] or `QFeatures` [@qfeatures] for quantifying features in a proteomic workflow.
+[Before model fitting, the high-dimensional `data` and sample metadata must be prepared. The `data` can either be a data frame or a list of data frames. In the single data frame format, each row should correspond to a target (e.g., a gene, exon, protein) and each column should correspond to a sample. Importantly, the user must ensure that any required pre-processing steps are performed before modeling, as seqwrap does not include pre-processing functionality. Pre-processing, such as quality control, filtering, normalization or transformations, depending on the nature of the data, must therefore be done using appropriate tools such as, e.g., `edgeR` for library size calculations in an RNA-seq workflow [@robinson2010], `minfi` for pre-processing Illumina methylation arrays [@fortin2014],  or `QFeatures` [@qfeatures] for quantifying features in a proteomic workflow.
 
 Once pre-processed data are organized in a data frame, target identifiers are expected either as row names or as the first column in the data frame. In this case, the target-specific response variable is referenced in the model formula using the placeholder `y` (e.g., `formula = y ~ 1`). Alternatively, users may provide a named list of data frames when multiple target-specific variables are required within a model. Each variable can then be referenced directly by name in the model formula, enabling more flexible model specifications that incorporate several target-level variables simultaneously.]{custom-style="edits"}
 
-[The accompanying `metadata` must contain all design variables referenced in the model formula, as well as a variable identifying sample names. These sample identifiers must correspond exactly to the sample columns in the high-dimensional data, and the ordering of samples in the `metadata` must match the ordering of columns in the data matrix. This alignment ensures that observations are correctly paired with their associated covariates during model fitting.]{custom-style="edits"}
+[The accompanying `metadata` must contain all design variables referenced in the model formula, as well as a variable identifying sample names. These sample identifiers must correspond exactly to the sample columns in the high-dimensional data. The sample name identifiers ensure that observations are correctly paired with their associated covariates during model fitting.]{custom-style="edits"}
 
-[An optional `targetdata` argument allows inclusion of target-specific metadata in addition to the standard sample `metadata`. Whereas sample metadata remain constant across model iterations, `targetdata` provides information that varies by target. Examples include fixed dispersion estimates obtained from preliminary analyses or prior parameter values used for regularization in maximum a posteriori (MAP) estimation. This separation of sample-level and target-level information facilitates efficient modeling while supporting advanced workflows that require target-specific parameters or annotations.]{custom-style="edits"}
+[An optional `targetdata` argument allows inclusion of target-specific metadata in addition to the standard sample `metadata`. Whereas sample metadata remain constant across model iterations, `targetdata` provides information that varies by target. Examples include fixed dispersion estimates obtained from preliminary analyses or prior parameter values used for regularization in maximum a posteriori (MAP) estimation. This separation of sample-level and target-level information facilitates efficient modeling while supporting advanced workflows that require target-specific parameters]{custom-style="edits"}
 
-### Core functions of seqwrap
+<!-- IS THIS REPETITION? -->
+
+### Core functions of seqwrap 
 
 [The package implements three core functions, `seqwrap_compose`, `seqwrap`, and `seqwrap_summarise`, corresponding to the composition, iterative fitting, and aggregation stages of the workflow (@fig-overview).]{custom-style="edits"}
 
-#### seqwrap_compose
 
-[`seqwrap_compose` assembles all required inputs for model fitting into a validated `swcontainer` object, which serves as the primary input to `seqwrap` for iterative model fitting. Required inputs include the high-dimensional data (a data frame or list of data frames, as described above), the sample metadata, the name of the sample identifier variable (`samplename`), the model-fitting function (`modelfun`, e.g., `glmmTMB::glmmTMB` or `stats::lm`), and a list of arguments to be passed to the model fitting function (`arguments`).These arguments must follow the conventions and syntax expected by the selected modelling framework.]{custom-style="edits"}
 
 [Optional inputs include target-specific metadata (`targetdata`) and user-defined functions for model summaries and evaluations (`summary_fun` and `eval_fun`). If custom summary or evaluation functions are not provided, `seqwrap` applies default methods that generate tabular summaries of model parameters.]{custom-style="edits"}
 
@@ -167,37 +167,8 @@ Once pre-processed data are organized in a data frame, target identifiers are ex
 
 Example of how iterative model fitting is implemented in seqwrap is shown in the code below (@lst-usage; see details in the supplementary material).
 
-```{r}
-#| label: lst-usage
-#| lst-cap: "Example of usage"
-#| eval: false
+<!-- MOVED model setup from here --->
 
-m1.1 <- seqwrap_compose(
-  modelfun = glmmTMB::glmmTMB,
-  data = counts, 
-  metadata = metadata, 
-  arguments = list(formula = y ~ treatment * surgery + offset(efflibsize), 
-                family = glmmTMB::nbinom2),
-  samplename = "seq_sample_id" # column in metadata with sample id that matches column name in data
-  )
-
-
-
-m1.1_temp <- seqwrap(
-  m1.1, 
-  cores = 1, 
-  subset = 1:24, # fit only the first 24 targets
-  return_models = TRUE,  # return model objects
-  verbose = FALSE
-)
-
-
-m1.1_temp_sum <- seqwrap_summarise(m1.1_temp, verbose = FALSE)
-
-m1.1_evaluations <- m1.1_temp_sum$evaluations # to generate the evaluation report
-
-m1.1_summaries <- m1.1_temp_sum$summaries # to generate the model summaries
-```
 
 ## Case studies
 
@@ -220,6 +191,60 @@ b_{g,j} &\sim \operatorname{Normal}(0, \sigma_g)
 $$ {#eq-model-1}
 
 Our model uses the parameterization $\text{Var}(Y_{gi}) = \mu_{gi} + \frac{\mu_{gi}^2}{\theta_{g}}$ so that $\theta_{g}$ represents the gene-specific inverse dispersion (as implemented in the glmmTMB package as `nbinom2`).
+
+[Using the seqwrap package we can define the code needed to run the model described in @eq-model-1 using the `seqwrap_compose` function. In the the most basic setup, `seqwrap_compose` assembles required inputs for model fitting into a validated `swcontainer` object, which serves as the primary input to `seqwrap` for iterative model fitting. Required inputs include the high-dimensional data, which in this case is a data frame with the first column holding the target names, the sample metadata, the name of the sample identifier variable (`samplename`), the model-fitting function (`modelfun`, e.g., `glmmTMB::glmmTMB` or `stats::lm`), and a list of arguments to be passed to the model fitting function (`arguments`). These arguments must follow the conventions and syntax expected by the selected modelling framework. 
+
+```{r}
+#| label: lst-usage
+#| lst-cap: "Model 1 code"
+#| eval: false
+
+
+m1 <- seqwrap_compose(
+      modelfun = glmmTMB::glmmTMB,
+      data = counts, 
+      metadata = metadata, 
+      arguments = list(
+            formula = y ~ time * group + offset(ln_efflibsize) + (1|id),
+            family = glmmTMB::nbinom2), 
+      samplename = "seq_sample_id" 
+  )
+
+```
+
+
+```{r}
+set.seed(100)
+
+
+# Display a gene count data set example
+gene_example <- seqwrappaper::pillon_counts$countdata |>
+      dplyr::select(geneid, GSM6107906, GSM6107907, GSM6107908) |> 
+      slice_sample(n = 6) |> 
+      mutate(`[...]` = rep("[...]", 6)) |> 
+      mutate(across(starts_with("GSM"), as.character)) |> 
+      add_row(geneid= "[...]", GSM6107906= "[...]", GSM6107907= "[...]", GSM6107908 = "[...]", `[...]` = "[...]")
+```
+
+
+```{r}
+
+
+# Display a metadata set example
+
+metadata_example <- seqwrappaper::pillon_counts$metadata |> 
+       filter(seq_sample_id %in% c("GSM6107906", "GSM6107907",  "GSM6107908")) |> 
+       add_row(seq_sample_id = "[...]", group = "[...]", id = "[...]", time = "[...]") 
+
+
+
+
+```
+
+
+
+
+
 
 #### Simulation study
 

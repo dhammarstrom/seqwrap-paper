@@ -72,7 +72,7 @@ lab_betacat <- function(x) {
 # Versioned to match the script: permutation/ holds the earlier two-arm run
 # (beta, m) with the old evaluation column names, permutation_v2/ the
 # four-arm run (beta, beta_reml, m, m_reml_satt).
-out_dir <- here::here("analysis/data/derived_data/permutation_v3")
+out_dir <- here::here("analysis/data/derived_data/permutation_v4")
 perm_files <- list.files(
   out_dir,
   pattern = "^perm_\\d+\\.RDS$",
@@ -139,11 +139,15 @@ stopifnot(any(perm_dat$is_alt))
 
 # Reloading gset to make code chunk independent of above
 gset <- readRDS(
-  here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
+  here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
 )
 
-# Extract beta values
-B <- minfi::getBeta(gset, offset = 100)
+# Beta derived from M, not getBeta(offset = 100): the GenomicRatioSet holds no
+# intensities and would ignore the offset silently. M is materialised once --
+# it is a 10^2 MB matrix.
+Mmat <- minfi::getM(gset)
+B <- 2^Mmat / (1 + 2^Mmat)
+rm(Mmat)
 
 # Pre-compute densities and save in data frame
 d <- density(rowMeans(B), from = 0, to = 1)
@@ -218,26 +222,30 @@ null_dat <- perm_dat |>
 # Alternative, keep only all nulls
 # filter(delta == 0)
 
-# Collect LRT test statistics
-lrt_null <- perm_evals |>
-  filter(convergence == 0) |>
-  dplyr::inner_join(perm_designs, by = c("iter", "target" = "id")) |>
-  filter(delta == 0) |>
+# The LR-test was removed in the latest permutation runs
+# to simplify presentation. LR-test are not recommended for small sample
+# glmm (see Bolker 2009).
 
-  # fail safe if mssing p-vals from larger
-  # simulation
-  filter(!is.na(pval)) |>
-  mutate(
-    Estimator = "ML",
-    Model = if_else(model == "beta", "&beta;<sub>ML</sub>", "M<sub>ML</sub>"),
-    Type = "LRT"
-  ) |>
-  dplyr::select(Model, Type, Estimator, pval)
+# Collect LRT test statistics
+# lrt_null <- perm_evals |>
+#   filter(convergence == 0) |>
+#   dplyr::inner_join(perm_designs, by = c("iter", "target" = "id")) |>
+#   filter(delta == 0) |>
+#
+#   # fail safe if mssing p-vals from larger
+#   # simulation
+#   filter(!is.na(pval)) |>
+#   mutate(
+#     Estimator = "ML",
+#     Model = if_else(model == "beta", "&beta;<sub>ML</sub>", "M<sub>ML</sub>"),
+#     Type = "LRT"
+#   ) |>
+#   dplyr::select(Model, Type, Estimator, pval)
 
 # Histogram alternative to the p-value distribution
 
 fig2 <- null_dat |>
-  filter(iter %in% 1:10) |>
+  filter(iter %in% 1:20) |>
   filter(convergence == 0) |>
   dplyr::select(model, iter, betacat, delta, target, term, p_wald, p_satt) |>
   pivot_longer(cols = p_wald:p_satt, names_to = "type", values_to = "pval") |>
@@ -250,10 +258,9 @@ fig2 <- null_dat |>
   ) |>
   filter(!is.na(pval)) |>
   dplyr::select(Model, Type, Estimator, pval) |>
-  bind_rows(lrt_null) |>
 
   mutate(
-    Type = factor(Type, levels = c("LRT", "Wald p-values", "Satterthwaite DDF"))
+    Type = factor(Type, levels = c("Wald p-values", "Satterthwaite DDF"))
   ) |>
 
   ggplot(aes(pval)) +
@@ -292,18 +299,6 @@ s1 <- null_dat |>
   dplyr::select(model, iter, betacat, delta, target, term, p_wald, p_satt) |>
   pivot_longer(cols = p_wald:p_satt, names_to = "type", values_to = "pval") |>
 
-  bind_rows(
-    perm_evals |>
-      filter(convergence == 0) |>
-      # fail safe if mssing p-vals from larger
-      # simulation
-      filter(!is.na(pval)) |>
-      dplyr::inner_join(perm_designs, by = c("iter", "target" = "id")) |>
-      filter(delta == 0) |>
-      mutate(term = "Omnibus", type = "LRT") |>
-
-      dplyr::select(model, iter, betacat, delta, target, term, type, pval)
-  ) |>
   filter(!is.na(pval)) |>
 
   dplyr::summarise(
@@ -379,8 +374,7 @@ fig3 <- model_error_type1_betacat |>
     type = dplyr::recode(
       type,
       p_wald = "Wald p-values",
-      p_satt = "Satterthwaite DDF",
-      LRT = "Omnibus LRT"
+      p_satt = "Satterthwaite DDF"
     )
   ) |>
 
@@ -466,7 +460,7 @@ se_stratum <- se_dat |>
 fig4 <- se_stratum |>
   dplyr::mutate(model = lab_model(model), betacat = lab_betacat(betacat)) |>
 
-  ggplot(aes(model, med_se)) +
+  ggplot(aes(model, med_se, fill = model)) +
 
   geom_violin() +
 
@@ -480,10 +474,13 @@ fig4 <- se_stratum |>
   theme_classic() +
   theme(
     axis.title.x = ggtext::element_markdown(),
-    axis.text.x = ggtext::element_markdown(),
     axis.title.y = ggtext::element_markdown(),
-    strip.text = element_blank()
+    legend.text = ggtext::element_markdown(),
+    strip.text = element_blank(),
+    legend.title = element_blank(),
+    axis.text.x = element_blank()
   ) +
+  scale_fill_manual(values = colors) +
 
   scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
   labs(x = NULL, y = "Standard error<br>(M-value units)")
@@ -510,45 +507,24 @@ crit_value <- function(p, alpha) {
 # contrasts and the data from the LRT test (ML only).
 #
 # `is_alt` is ground truth. These are the sites with added effect.
-power_dat <- dplyr::bind_rows(
-  perm_dat |>
-    dplyr::filter(convergence == 0, term %in% alt_terms) |>
-    dplyr::select(
-      model,
-      iter,
-      target,
-      betacat,
-      delta,
-      delta_abs,
-      estimate,
-      p_wald,
-      p_satt
-    ) |>
-    tidyr::pivot_longer(
-      cols = c(p_wald, p_satt),
-      names_to = "type",
-      values_to = "pval"
-    ),
-
-  perm_evals |>
-    dplyr::filter(convergence == 0) |>
-    # The REML arms carry no LRT (see eval_fun in the permutation
-    # script), and arrive here as NA rather than as absent rows.
-    dplyr::filter(!is.na(pval)) |>
-    dplyr::inner_join(perm_designs, by = c("iter", "target" = "id")) |>
-    dplyr::mutate(type = "LRT", estimate = NA_real_) |>
-    dplyr::select(
-      model,
-      iter,
-      target,
-      betacat,
-      delta,
-      delta_abs,
-      estimate,
-      type,
-      pval
-    )
-) |>
+power_dat <- perm_dat |>
+  dplyr::filter(convergence == 0, term %in% alt_terms) |>
+  dplyr::select(
+    model,
+    iter,
+    target,
+    betacat,
+    delta,
+    delta_abs,
+    estimate,
+    p_wald,
+    p_satt
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(p_wald, p_satt),
+    names_to = "type",
+    values_to = "pval"
+  ) |>
 
   # Applied to nulls and alternatives together: dropping the Satterthwaite
   # failures from one side only would change which sites a cell is scored
@@ -558,7 +534,7 @@ power_dat <- dplyr::bind_rows(
     is_alt = delta != 0,
     sgn = sign(delta),
     model = factor(model),
-    type = factor(type, levels = c("p_wald", "p_satt", "LRT"))
+    type = factor(type, levels = c("p_wald", "p_satt"))
   )
 
 stopifnot(any(power_dat$is_alt), any(!power_dat$is_alt))
@@ -643,7 +619,7 @@ power_agg <- function(dat, by = character()) {
 power_overall <- power_agg(power_cell)
 power_delta <- power_agg(power_cell, by = c("delta_abs"))
 power_strata <- power_agg(power_cell, by = c("betacat", "delta_abs"))
-power_sign <- power_agg(power_cell, by = c("betacat", "delta_abs", "sgn"))
+power_sign <- power_agg(power_cell, by = c("delta_abs", "betacat", "sgn"))
 
 
 fig5 <- power_sign |>
@@ -659,20 +635,20 @@ fig5 <- power_sign |>
   ggplot(aes(
     delta_abs * sgn,
     100 * m.power,
-    fill = Model,
-    shape = Model,
-    group = Model
+    color = betacat,
+    group = paste(Model, betacat)
   )) +
   geom_line(alpha = 0.4) +
   geom_point(size = 2, alpha = 0.5) +
-  ggh4x::facet_grid2(~betacat, strip = strip) +
+  ggh4x::facet_grid2(~Model) +
   theme_classic() +
   theme(
     legend.position = "right",
     legend.title = element_blank(),
     legend.text = ggtext::element_markdown(),
     axis.title.x = ggtext::element_markdown(),
-    strip.text = element_blank(),
+    strip.text = ggtext::element_markdown(hjust = 0),
+    strip.background = element_blank(),
   ) +
   scale_colour_manual(values = colors) +
   scale_shape_manual(values = c(21, 24, 23, 22)) +
@@ -683,7 +659,7 @@ fig5 <- power_sign |>
   scale_y_continuous(limits = c(0, 100), expand = c(0, 5)) +
   scale_fill_manual(values = colors) +
   labs(
-    x = "Added effect (&delta;, M-value units)",
+    x = "Added effect (&delta;, M-value)",
     y = "Size-adjusted\npower (%)"
   )
 
@@ -695,8 +671,8 @@ fig5 <- power_sign |>
 # with `p_wald` and `p_satt` per contrast, the latter on the REML arms only.
 # The earlier two-arm files in the derived_data root (beta-model-full.RDS,
 # m-model-full.RDS) carry a different summary schema and are superseded by it.
-full_dir <- here::here("analysis/data/derived_data/full_v2")
-full_arms <- c("beta", "beta_reml", "m", "m_reml")
+full_dir <- here::here("analysis/data/derived_data/full_v3")
+full_arms <- c("beta_reml", "m_reml")
 full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
 
 # Unlike the permutation study, a missing file is NOT refitted on the fly: the
@@ -834,13 +810,18 @@ results1 <- res |>
       term == "time3_loading" ~ "Loading",
       term == "time4_unloading" ~ "Unloading",
       term == "time5_reloading" ~ "Reloading"
-    )
+    ),
+    term = factor(term, levels = c("Loading", "Unloading", "Reloading"))
   ) |>
 
   ggplot(aes(est_M)) +
   geom_line(stat = "density") +
   facet_wrap(~term) +
-  scale_x_continuous(limits = c(-1, 1)) +
+  scale_x_continuous(
+    limits = c(-1, 1),
+    breaks = c(-0.8, -0.4, 0, 0.4, 0.8),
+    labels = c("-.8", "-.4", 0, ".4", ".8")
+  ) +
   theme_classic() +
   theme(
     axis.title.y = element_blank(),
@@ -854,8 +835,22 @@ results1 <- res |>
   labs(x = "Estimated effects (M-value units)")
 
 
+full_errors |>
+  filter(stage == "fit") |>
+  summarise(.by = c(type, model), n = n()) |>
+  mutate(percentage = n / n_full_sites) |>
+  print()
+
+full_errors |>
+  distinct(message)
+
+
 res |>
+
+  mutate(.by = c(model, term), fdr = p.adjust(p_satt, method = "fdr")) |>
+
   filter(p_satt < 0.05) |>
+
   mutate(sign = if_else(estimate > 0, "up", "down")) |>
   summarise(.by = c(term, model, sign), n = n()) |>
   mutate(identity = if_else(sign == "up", n, -n)) |>
@@ -876,11 +871,90 @@ nsites <- nrow(anno)
 rm(gset)
 gc()
 
+# The timimg results
+timing_dir <- here::here("analysis/data/derived_data/timing_v1")
+
 timing_cells <- readRDS(file.path(timing_dir, "timing-cells.RDS"))
+timing_scaling <- readRDS(file.path(timing_dir, "timing-scaling.RDS"))
+
+# Size block: is the cost linear in k?
+#
+# `timing-scaling.RDS` carries an `exponent` and a `linear` flag from a log-log
+# fit of elapsed time on k. That fit has NO intercept term, so it tests whether
+# elapsed time is PROPORTIONAL to k, which cannot hold when there is a fixed
+# per-call cost of about a minute: at the k used here the intercept dominates,
+# and the exponent it returns (~0.16 to 0.35) measures that dominance rather
+# than the scaling. The saved `linear` column is therefore FALSE for all four
+# arms and is not read here.
+#
+# The test with the intercept restored is elapsed = a + b * k^c, with linearity
+# at c = 1, and the curvature check is whether a quadratic term is needed. Both
+# are computed from the raw cells.
+timing_size <- dplyr::filter(timing_cells, block == "size")
+
+timing_fit <- timing_size |>
+  dplyr::group_by(arm) |>
+  dplyr::group_modify(function(d, key) {
+    lin <- stats::lm(elapsed ~ k, data = d)
+    quad <- stats::lm(elapsed ~ k + I(k^2), data = d)
+
+    nl <- tryCatch(
+      stats::nls(
+        elapsed ~ a + b * k^c,
+        data = d,
+        start = list(
+          a = stats::coef(lin)[[1]],
+          b = stats::coef(lin)[[2]],
+          c = 1
+        ),
+        control = stats::nls.control(maxiter = 200, warnOnly = TRUE)
+      ),
+      error = function(e) NULL
+    )
+
+    # Profile intervals on an nls fit can fail to converge; the Wald
+    # interval is the fallback, and NA is reported rather than a number
+    # of unknown provenance if both fail.
+    ci <- if (is.null(nl)) c(NA_real_, NA_real_) else {
+      s <- summary(nl)$coefficients["c", ]
+      prof <- tryCatch(
+        suppressMessages(stats::confint(nl, "c")),
+        error = function(e) NULL,
+        warning = function(w) NULL
+      )
+      if (is.null(prof)) {
+        s[["Estimate"]] + c(-1.96, 1.96) * s[["Std. Error"]]
+      } else {
+        as.numeric(prof)
+      }
+    }
+
+    data.frame(
+      r2 = summary(lin)$r.squared,
+      exponent = if (is.null(nl)) NA_real_ else stats::coef(nl)[["c"]],
+      exponent_lo = ci[1],
+      exponent_hi = ci[2],
+      p_quadratic = summary(quad)$coefficients["I(k^2)", 4]
+    )
+  }) |>
+  dplyr::ungroup()
 
 
-nsites
-
+timing_tab <- timing_scaling$scaling |>
+  dplyr::select(arm, scale, estimator, overhead_s, per_target_s) |>
+  dplyr::inner_join(timing_fit, by = "arm") |>
+  dplyr::inner_join(
+    dplyr::select(
+      timing_scaling$extrapolation,
+      arm,
+      k_full,
+      predicted_h,
+      observed_h,
+      error_pct
+    ),
+    by = "arm"
+  ) |>
+  dplyr::mutate(per_target_ms = per_target_s * 1000)
 
 # Approximate start up cost
 # This calculates the intercept for each arm and averages
@@ -917,7 +991,7 @@ time1 <- timing_cells |>
   scale_color_manual(values = colors) +
 
   geom_smooth(method = "lm", se = FALSE, linewidth = 0.4) +
-  labs(x = "m (number of targets)", y = "Elapsed time (seconds)") +
+  labs(x = "m (number of targets)", y = "Elapsed time\n(seconds)") +
   theme_classic() +
   scale_y_continuous(limits = c(0, 300), expand = c(0, 0)) +
 
@@ -925,7 +999,7 @@ time1 <- timing_cells |>
   annotate(
     "text",
     x = 3000,
-    y = start_up + 8,
+    y = start_up + 10,
     label = "Start-up cost",
     color = "gray40",
     size = 3
@@ -942,7 +1016,11 @@ annotation_time <- timing_tab |>
   filter(arm == "beta_reml") |>
   select(observed_h, predicted_h) |>
   pivot_longer(cols = everything()) |>
-  mutate(name = gsub("_h", "", name), name = stringr::str_to_sentence(name))
+  mutate(
+    name = gsub("_h", "", name),
+    name = stringr::str_to_sentence(name),
+    value = if_else(value == max(value), value + 0.1, value - 0.3)
+  )
 
 # Timimng (and prediction) of the full experiment
 time2 <- timing_tab |>
@@ -979,8 +1057,9 @@ time2 <- timing_tab |>
 
   scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = colors) +
+  scale_y_continuous(limits = c(2, 12), expand = c(0, 0)) +
 
-  labs(x = "", y = "Elapsed time (hours)") +
+  labs(x = "", y = "Elapsed time\n(hours)") +
 
   ggtext::geom_richtext(
     aes(label = Model, color = NULL),
@@ -1009,18 +1088,25 @@ figure5 <- cowplot::plot_grid(
     fig1,
     fig3,
     fig4,
-    fig5,
     align = "v",
     axis = "lr",
     ncol = 1,
-    rel_heights = c(0.4, 1, 0.8, 0.8),
-    labels = c("", "", "C", "D"),
+    rel_heights = c(0.4, 1, 0.6, 0.8),
+    labels = c("", "", "B", "C"),
     label_y = 1.2
   ),
-  cowplot::plot_grid(time1, time2, rel_widths = c(1, 0.5)),
+  cowplot::plot_grid(NULL, fig5, results1, rel_widths = c(0.1, 1, 1), ncol = 3),
+  cowplot::plot_grid(
+    NULL,
+    time1,
+    time2,
+    NULL,
+    rel_widths = c(0.1, 0.9, 0.6, 0.1),
+    ncol = 4
+  ),
   ncol = 1,
-  rel_heights = c(1.5, 0.5),
-  labels = c("B", "E")
+  rel_heights = c(1.5, 0.5, 0.5),
+  labels = c("A", "D")
 )
 
 
