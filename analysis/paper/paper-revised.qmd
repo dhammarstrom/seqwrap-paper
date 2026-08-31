@@ -353,7 +353,7 @@ weight <- filter(sample_metadata, name == "weight") |> pull(stat)
 
 # Count the number of probes in the final data set. 
 gset <- readRDS(
-    here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
+    here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
   )
 
 probes <- dim(gset)[1]
@@ -362,13 +362,11 @@ probes <- dim(gset)[1]
 ```
 
 
-[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Files were read and normalized (quantile normalization [@fortin2014]) before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
+[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@aryee2014]. Files were read and normalized using between-array quantile normalization (`preprocessQuantile()`), stratified by probe region and applied with outlier correction, before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
 
-[For each sample and CpG site, the methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to the denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a]. 
+[Between-array quantile normalization returns methylation as a log ratio rather than as a pair of intensities. For each sample and CpG site the M-value was therefore taken directly as $M =\log_2(\text{Meth}/\text{Unmeth})$, and the methylation ratio, also called the &beta; value, was derived from it by the inverse logit, $\beta = 2^{M}/(1 + 2^{M})$. No offset constant was used. As the &beta; values are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a].]{custom-style="edits"}
 
-
-
-We therefore evaluated the characteristics of these modeling choices using a permutation experiment to evaluate the type I error rate and power together with inferential agreement between the two models. We also used the full data set [@seaborne2018] to show that seqwrap is able to fit a large number of targets (`r probes` CpG sites). ]{custom-style="edits"}
+[In small samples modeled with Gaussian mixed-effects models, restricted maximum likelihood (REML) estimation and subsequent derivation of p-values from a corrected reference distribution, using, e.g., Satterthwaite's method to approximate the denominator degrees of freedom (DDF), will lead to acceptable type I error rates [@luke2017]. Conversely, failing to account for small sample bias will inflate the type I error rate and invalidate inference. For generalized linear mixed models, REML estimation has not been standard practice due to difficulties extending the method to non-normal outcomes [@maestrini2026]. However, several extensions have been proposed and shown to reduce small-sample bias when estimating variance components in generalized linear mixed models [@maestrini2026]. Similar to REML estimation, Satterthwaite's method for approximating DDF, which was not previously implemented in software for modeling non-normal outcome variables, is now available in the glmmTMB package. We therefore chose to evaluate the characteristics of these modeling choices using a permutation experiment to assess the type I error rate and power in the small-sample-size but large-target-size methylation data set. We also used the full data set [@seaborne2018] to show that seqwrap can handle a large number of targets (`r probes` CpG sites).]{custom-style="edits"}
 
 #### Model building and permutation experiment
 
@@ -755,13 +753,159 @@ stopifnot(any(perm_dat$is_alt))
 # This figure extracts the &beta; values and shows the strata
 # used in  the permutation study.
 
-# Extract the beta values  ##############
+# Extracting full fit data     ################################################
+
+# The results directory is VERSIONED in the same way as the permutation
+# directory: full_v2/ holds the four-arm run (beta, beta_reml, m, m_reml)
+# with `p_wald` and `p_satt` per contrast, the latter on the REML arms only.
+# The earlier two-arm files in the derived_data root (beta-model-full.RDS,
+# m-model-full.RDS) carry a different summary schema and are superseded by it.
+full_dir <- here::here("analysis/data/derived_data/full_v3")
+full_arms <- c("beta_reml", "m_reml")
+full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
+
+# Unlike the permutation study, a missing file is NOT refitted on the fly: the
+# four arms together are close to a day of wall-clock time (see the timings
+# reported below), so what is missing is reported instead.
+if (!all(file.exists(full_files)))
+  stop(
+    "missing arm files in full_v2/: ",
+    paste(basename(full_files[!file.exists(full_files)]), collapse = ", "),
+    ". Run analysis/R/methylation-case-full.R first.",
+    call. = FALSE
+  )
+
+# Optionally trim the read to a subset of fixed effects. All terms are kept by
+# default; the four time contrasts plus the intercept over 770 441 sites is
+# ~3.9 million rows per arm, so setting this to the contrast(s) actually
+# reported is the lever if the render is memory-bound.
+full_keep_terms <- NULL
+
+# One arm at a time. Each arm object is on the order of 10^2 MB, so the
+# per-fit diagnostics are joined on WITHIN the arm and the arm is dropped
+# before the next one is read, rather than binding four whole arms and joining
+# afterwards.
+read_full_arm <- function(file) {
+  arm <- readRDS(file)
+
+  summaries <- if (is.null(full_keep_terms)) arm$summaries else
+    dplyr::filter(arm$summaries, term %in% full_keep_terms)
+
+  # Carry convergence, singularity and the participant SD across from the
+  # evaluation slot, exactly as perm_dat does above: the arms fail at
+  # different rates, so a failed fit has to be droppable from the tests
+  # rather than quietly changing which sites each arm is scored on.
+  dat <- summaries |>
+    dplyr::inner_join(
+      dplyr::select(arm$evaluations, target, convergence, singular, re_sd),
+      by = "target"
+    ) |>
+    # Constant within an arm, so stored as factors: at this number of
+    # rows the same three labels as character vectors are hundreds of
+    # MB of pointers for no extra information.
+    dplyr::mutate(
+      model = factor(arm$model, levels = full_arms),
+      estimator = factor(
+        if (isTRUE(arm$meta$reml)) "REML" else "ML",
+        levels = c("ML", "REML")
+      ),
+      scale = factor(arm$meta$scale, levels = c("beta", "M"))
+    )
+
+  # seqwrap_summarise() drops failed targets rather than returning empty
+  # rows, so a target present in one slot and not the other would silently
+  # shrink the arm here.
+  stopifnot(nrow(dat) == nrow(summaries))
+
+  evaluations <- dplyr::mutate(
+    arm$evaluations,
+    model = factor(arm$model, levels = full_arms)
+  )
+
+  # `class` and `message` come back as character vectors named by target;
+  # the names are dropped so the bound frame does not carry four sets of
+  # them.
+  errors <- if (NROW(arm$errors)) {
+    arm$errors |>
+      dplyr::mutate(
+        class = unname(class),
+        message = unname(message),
+        model = factor(arm$model, levels = full_arms)
+      )
+  } else NULL
+
+  out <- list(
+    dat = dat,
+    evaluations = evaluations,
+    errors = errors,
+    meta = arm$meta
+  )
+
+  rm(arm, summaries)
+  gc()
+
+  out
+}
+
+full_list <- lapply(full_files, read_full_arm)
+
+# full_dat:    one row per (model, site, fixed effect) -- the frame the
+#              per-position analysis is read from.
+# full_evals:  one row per (model, site) -- fit-level diagnostics.
+# full_errors: one row per condition raised (warnings and errors), by stage.
+# full_meta:   one row per arm -- what was fitted, on how many cores, how long.
+full_dat <- dplyr::bind_rows(lapply(full_list, `[[`, "dat"))
+full_evals <- dplyr::bind_rows(lapply(full_list, `[[`, "evaluations"))
+full_errors <- dplyr::bind_rows(lapply(full_list, `[[`, "errors"))
+full_meta <- dplyr::bind_rows(lapply(full_list, `[[`, "meta"))
+
+rm(full_list)
+gc()
+
+# `reml` in the evaluation slot is read off the fit object, not off the arm
+# name (see eval_fun in the script), so this is the check that the arm
+# labelling agrees with what was actually estimated. The arms are also all
+# fitted on the same set of sites, which is what makes them comparable
+# site-by-site.
+stopifnot(
+  setequal(as.character(full_evals$model), full_arms),
+  all(full_evals$reml == grepl("_reml$", as.character(full_evals$model))),
+  length(unique(full_meta$k)) == 1L,
+  length(unique(full_meta$n)) == 1L
+)
+
+# The number of sites and samples the full run was fitted on.
+n_full_sites <- unique(full_meta$k)
+n_full_samples <- unique(full_meta$n)
+
+# The contrasts: 1_baseline is the reference level, so the time terms are the
+# differences from baseline. The intercept is present in full_dat but is not a
+# contrast and is excluded here.
+full_terms <- setdiff(unique(full_dat$term), "(Intercept)")
+
+
+# Combine the full results for the target models
+res <- full_dat |>
+  filter(estimator == "REML") |>
+  filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |>
+  mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate))
+
+
 
 # Reloading gset to make code chunk independent of above
 gset <- readRDS(
   here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
 )
 
+n_fits <- dim(gset)
+
+# Number of issues 
+n_fit_issues <- full_errors |> 
+      filter(stage == "fit") |> 
+      summarise(.by = c(type, model), 
+                n = n()) |>  
+      pull(n)
+      
 
 
 
@@ -769,7 +913,9 @@ gset <- readRDS(
 
 ```
 
-Using the permutation experiment we first estimated the calibration of the two candidate models for the analysis of DNA methylation data in a small repeated-measures data set (n = 8, 38 samples; [@seaborne2018]). Both models had inflated type I error rates across all &beta;-value strata (@fig-figure5). Averaged over &beta; categories and model terms the Gaussian models on M values had slightly lower type I error compared to the beta regression model (`r m_error`, vs. `r beta_error`; mean difference: `r error_diff`).
+[Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by the Satterthwaite method, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 A). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 B). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 C).]{custom-style="edits"}     
+
+The full data sets were fitted with a low rate of convergence issues; out of a total of `r nfits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues.
 
 
 
