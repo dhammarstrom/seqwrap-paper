@@ -272,7 +272,7 @@ if (show_figures) {
 
 Simulated data sets were used to assess inferential performance of five types of models: The negative binomial model (already described in @eq-model-1), a Poisson model with observation-level random effects (OLRE) to handle overdispersion, and a Gaussian model with transformed count data as the dependent variable, as previously suggested [@vestal_lmerseq_2022]. The negative binomial and the Poisson OLRE models were further extended to include empirical Bayes parameter regularization using priors estimated from preliminary models. All models contained the same fixed-effect structure, including group, time, and their interaction, as well as a random intercept per participant (@eq-model-1).
 
-The Poisson OLRE model includes both a gene-specific varying intercept term for each participant *j* (*b*~*g*,*j*\[*i*\]~) and an OLRE (*b*~*g*,*i*~) for each observation *i* in the data set. Poisson OLRE have previously been used to account for overdispersion in count data with favorable characteristics [@harrison2014], including RNA-seq data [@sun2017]. Similar to the negative binomial model (@eq-model-1), the Poisson model includes an offset term representing the size factor of the library size (*s~i~*; @eq-model-2). For compactness  
+The Poisson OLRE model includes both a gene-specific varying intercept term for each participant *j* (*b*~*g*,*j*\[*i*\]~) and an OLRE (*b*~*g*,*i*~) for each observation *i* in the data set. Poisson OLRE have previously been used to account for overdispersion in count data with favorable characteristics [@harrison2014], including RNA-seq data [@sun2017]. Similar to the negative binomial model (@eq-model-1), the Poisson model includes an offset term representing the size factor of the library size (*s~i~*; @eq-model-2). 
 
 $$
 \begin{align}
@@ -362,9 +362,13 @@ probes <- dim(gset)[1]
 ```
 
 
-[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Files were read and normalized (functional normalization [@fortin2014]) before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
+[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@fortin2014]. Files were read and normalized (quantile normalization [@fortin2014]) before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
 
-[For each sample and CpG site, the methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to the denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a]. We therefore evaluated the characteristics of these modeling choices using a permutation experiment to evaluate the type I error rate and power together with inferential agreement between the two models. We also used the full data set [@seaborne2018] to show that seqwrap is able to fit a large number of targets (`r probes` CpG sites). ]{custom-style="edits"}
+[For each sample and CpG site, the methylation ratio, also called the &beta; value, was calculated as the ratio of methylated to total signal intensity, with both intensities floored at zero and an offset constant of c = 100 added to the denominator [@bibikova2006;@fortin2014]. As the &beta; values calculated with the offset constant are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a]. 
+
+
+
+We therefore evaluated the characteristics of these modeling choices using a permutation experiment to evaluate the type I error rate and power together with inferential agreement between the two models. We also used the full data set [@seaborne2018] to show that seqwrap is able to fit a large number of targets (`r probes` CpG sites). ]{custom-style="edits"}
 
 #### Model building and permutation experiment
 
@@ -437,11 +441,9 @@ beta_model_summary <- seqwrap_summarise(beta_model_results)
 
 Note that the when the family argument is empty in glmmTMB, the Gaussian (normal) distribution is assumed.
 
-To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 250 iterations, systematic time-effects were removed by resampling the time variable within participants creating plasmode [@gadbury2008] data sets with a permuted time variable. This retained the within-participant correlation between samples while removing the association between time and methylation status. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). Our approach deviates from the workflow for the creation plasmode data sets suggested by @gadbury2008 but enables systematic evaluation of model characteristics at tracable magnitudes and direction of effects between data sets (M and &beta; values, respectively). After each iteration, type I error rates where estimated as the proportion of p-values < 0.05 among true null sites. The false discovery proportion was evaluated after adjustment of p-values using the false discovery rate (FDR) procedure implemented in `p.adjust(..., method = "fdr")` per parameter and model. Power was estimated among sites with added effects at the empirical critical  the percentage of sites with adjusted p-values < 0.05. Finally, agreement between models were assessed using the mean parameter value and the p-value.
+To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 200 iterations, systematic time-effects were removed by resampling the time variable within participants creating plasmode [@gadbury2008] data sets with a permuted time variable. This retained the within-participant correlation between samples while removing the association between time and methylation status. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). Our approach deviates from the workflow for the creation plasmode data sets suggested by @gadbury2008 but enables systematic evaluation of model characteristics at tracable magnitudes and direction of effects between data sets (M and &beta; values, respectively). After each iteration, type I error rates where estimated as the proportion of p-values < 0.05 among true null sites. Power was estimated among sites with added effects as the percentage of sites with p-values below the empirical critical value.
 
-<!-- FIX THE ABOVE -->
-
-Following the permutation experiment, we fitted the models using the full data sets of  &beta;, and M-values and identified the differentially methylated CpG sites as sites with adjusted p-values (FDR procedure) < 0.05.]{custom-style="edits"}
+Following the permutation experiment, we fitted the models using the full data sets of &beta;, and M-values and estimated the site-specific effect as contrasts between the baseline and follow-up time-points.]{custom-style="edits"}
 
 ## Results
 
@@ -686,112 +688,86 @@ if (show_figures) {
 #| echo: false
 
 
-# Extracting results from the permutation experiment
 # list files in permutation results folder
-out_dir <- here::here("analysis/data/derived_data/permutation")
-perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
+# Versioned to match the script: permutation/ holds the earlier two-arm run
+# (beta, m) with the old evaluation column names, permutation_v2/ the
+# four-arm run (beta, beta_reml, m, m_reml_satt).
+out_dir <- here::here("analysis/data/derived_data/permutation_v4")
+perm_files <- list.files(
+  out_dir,
+  pattern = "^perm_\\d+\\.RDS$",
+  full.names = TRUE
+)
 
-if (length(perm_files) == 0) source(
-      here::here("analysis/R/methylation-error-permutation.R")
-      )
+if (length(perm_files) == 0)
+  source(
+    here::here("analysis/R/methylation-error-permutation.R")
+  )
+
+n_perm <- length(perm_files)
 
 
-# Setting the spike time point
+### Reading the results back
 spike_time <- "3_loading"
 
-perm_files <- list.files(out_dir, pattern = "^perm_\\d+\\.RDS$", full.names = TRUE)
-perm       <- lapply(perm_files, readRDS)
+perm_files <- list.files(
+  out_dir,
+  pattern = "^perm_\\d+\\.RDS$",
+  full.names = TRUE
+)
+perm <- lapply(perm_files, readRDS)
 
 perm_summaries <- dplyr::bind_rows(lapply(perm, `[[`, "summaries"))
-perm_designs   <- dplyr::bind_rows(lapply(perm, `[[`, "design"))
-perm_evals     <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
+perm_designs <- dplyr::bind_rows(lapply(perm, `[[`, "design"))
+perm_evals <- dplyr::bind_rows(lapply(perm, `[[`, "evaluations"))
 
+
+# Which coefficients with the simulated effect.
+#
+# The added effect shifts only the samples labelled `spike_time` under the
+# permuted labels. `spike_time` is set to 3_loading and
+# 1_baseline is the reference level.
 
 # alt_terms also accepts and omnibus test (not used here)
-alt_terms <- c(paste0("time_permute", spike_time), "time_omnibus")
+# Instead, the omnibus test is saved per target in the eval slot.
+alt_terms <- c(paste0("time_permute", spike_time))
 
 # Attach the per-iteration effects (delta, sign, stratum) to every test.
 # is_alt is ground truth for a (site, term) pair, not for a site.
 perm_dat <- perm_summaries |>
-      dplyr::inner_join(perm_designs,
-                        by = c("iter", "target" = "id")) |>
-      # delta is signed, so the test must be != 0 -- `delta > 0` would classify
-      # every downward-spiked site as a null and contaminate the reference.
-      dplyr::mutate(is_alt = delta != 0 & term %in% alt_terms)
+  dplyr::inner_join(perm_designs, by = c("iter", "target" = "id")) |>
+  # Carry the per-fit convergence code across from the evaluation slot so
+  # that failed fits can be dropped from the Wald error rates too. This
+  # matters because the arms can fail at different rates, which would
+  # quietly change which sites each arm is scored on.
+  dplyr::inner_join(
+    perm_evals |>
+      dplyr::select(iter, target, model, convergence),
+    by = c("iter", "target", "model")
+  ) |>
+  # delta is signed, so the test must be != 0 -- `delta > 0` would classify
+  # every downward-spiked site as a null and contaminate the reference.
+  dplyr::mutate(is_alt = delta != 0 & term %in% alt_terms)
 
 stopifnot(any(perm_dat$is_alt))
 
 
-# Calculate the overall type 1 error rate
+# This figure extracts the &beta; values and shows the strata
+# used in  the permutation study.
 
-null_dat <- perm_dat |> 
-      # Keep null effects in non affected sites
-      filter(!(delta != 0 & term == "time_permute3_loading")) 
+# Extract the beta values  ##############
 
-      # Alternative, keep only all nulls
-      filter(delta == 0) 
-
-# This is the summary across all iterations and terms
-# this will give the error rate in each iteration/term/betacat/model
-s1 <- null_dat |>
-    dplyr::summarise(.by = c(model, betacat, iter, term),
-                     n = dplyr::n(), 
-                     sig = sum(p.value < 0.05, na.rm = TRUE),       
-                     error = sig / n)
-
-# Collapse strata and terms *within* an iteration: the permutation is the     
-# resampling unit, so one error rate per iteration per model.
-s1_iter <- s1 |>
-      dplyr::summarise(.by = c(model, iter), error = mean(error))
-
-model_error_type1 <- s1_iter |>
-      dplyr::summarise(.by = c(model),
-                       m.error = mean(error),
-                       s.error = stats::sd(error),
-                       n_iter  = dplyr::n(),
-                       mcse    = s.error / sqrt(n_iter)) |>
-      dplyr::mutate(lo = m.error - 1.96 * mcse,
-                    hi = m.error + 1.96 * mcse)
+# Reloading gset to make code chunk independent of above
+gset <- readRDS(
+  here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
+)
 
 
-beta_error <- paste0(round(model_error_type1[1,2] * 100, 2), 
-                    "% [", 
-                    round(model_error_type1[1,6] * 100, 2), 
-                    ", ", 
-                    round(model_error_type1[1,7] * 100, 2), 
-                    "]")
-m_error <- paste0(round(model_error_type1[2,2] * 100, 2), 
-                    "% [", 
-                    round(model_error_type1[2,6] * 100, 2), 
-                    ", ", 
-                    round(model_error_type1[2,7] * 100, 2), 
-                    "]")
 
 
-# Paired: both models see the same relabelling in each iteration.
-model_error_diff <- s1_iter |>
-            tidyr::pivot_wider(id_cols = iter, 
-                               names_from = model, 
-                               values_from = error) |>
-      
-      dplyr::summarise(
-            d = mean(beta - m),
-            d_mcse = stats::sd(beta - m) /sqrt(dplyr::n())) |>      
-      dplyr::mutate(lo = d - 1.96 * d_mcse, 
-                    hi = d + 1.96 * d_mcse)
-
-error_diff <- paste0(round(model_error_diff[1,1] * 100, 2), 
-                    "% [", 
-                    round(model_error_diff[1,3] * 100, 2), 
-                    ", ", 
-                    round(model_error_diff[1,4] * 100, 2), 
-                    "]")
 
 
 ```
-
-
-
 
 Using the permutation experiment we first estimated the calibration of the two candidate models for the analysis of DNA methylation data in a small repeated-measures data set (n = 8, 38 samples; [@seaborne2018]). Both models had inflated type I error rates across all &beta;-value strata (@fig-figure5). Averaged over &beta; categories and model terms the Gaussian models on M values had slightly lower type I error compared to the beta regression model (`r m_error`, vs. `r beta_error`; mean difference: `r error_diff`).
 
