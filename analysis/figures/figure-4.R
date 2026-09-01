@@ -54,31 +54,35 @@ filtered_counts <- readRDS(here::here(
 # Count number of successful models
 summaries <- lapply(models_data[1:5], seqwrap_summarise, verbose = FALSE)
 
+
 # Extract successful models
 targets_models <- bind_rows(
   summaries$m1_results$evaluations |>
     mutate(model = "m1"),
   summaries$m2_results$evaluations |>
     mutate(model = "m2"),
-  summaries$m3_results$evaluations |>
-    mutate(model = "m3"),
+
   summaries$m4_results$evaluations |>
     mutate(model = "m4"),
   summaries$m5_results$evaluations |>
     mutate(model = "m5")
 ) |>
-
-  # Filter singular fits and bad convergence
-  filter(!(model == "m3" & isSingular == TRUE)) |>
-  # Poisson and NB models do not have pdHess == FALSE or convergence != 0
-  # but for failsafe
-  filter(
-    !(model %in%
-      c("m1", "m2", "m4", "m5") &
-      (pdHess == FALSE | convergence != 0))
-  ) |>
+  filter(convergence == 0 & pdHess == TRUE) |>
   group_by(model) |>
-  distinct(target)
+  distinct(target) |>
+  ungroup() |>
+
+  # For model m3, is singular is the main culprit
+  bind_rows(
+    summaries$m3_results$evaluations |>
+      mutate(model = "m3") |>
+
+      filter(isSingular == "FALSE") |>
+      group_by(model) |>
+      distinct(target) |>
+      ungroup()
+  )
+
 
 # Sums number of successful estimated targets  #
 n_estimates <- targets_models |>
@@ -321,77 +325,85 @@ sig_genes_df <- stat |>
 
 # Calculate sum of all declared significant genes
 total_n <- sig_genes_df |>
-      pivot_longer(cols = -target) |>
-      filter(value) |>
-      distinct(target) |>
-      nrow()
+  pivot_longer(cols = -target) |>
+  filter(value) |>
+  distinct(target) |>
+  nrow()
 
 
 upset <- sig_genes_df |>
-      pivot_longer(cols = -target) |>
-      filter(value) |>
+  pivot_longer(cols = -target) |>
+  filter(value) |>
   group_by(target) |>
-      summarise(
-                model = list(name)) |>
+  summarise(
+    model = list(name)
+  ) |>
 
-
-      ggplot(aes(x = model)) +
-      geom_bar() +
-      scale_x_upset() +
-      geom_text(stat='count',
-                aes(label=paste0(
-                      round(100 * (after_stat(count) / total_n), 0), "%")
-                    ),
-                vjust=-1,
-                size = 2.5) +
-      theme(axis.title.y = element_blank(),
-            panel.background = element_blank(),
-            axis.title.x = element_blank()) +
-      scale_y_continuous(limits = c(0, 1200),
-                         expand =c(0,0),
-                         breaks = c(0, 250, 500, 750, 1000))
+  ggplot(aes(x = model)) +
+  geom_bar() +
+  scale_x_upset() +
+  geom_text(
+    stat = 'count',
+    aes(
+      label = paste0(
+        round(100 * (after_stat(count) / total_n), 0),
+        "%"
+      )
+    ),
+    vjust = -1,
+    size = 2.5
+  ) +
+  theme(
+    axis.title.y = element_blank(),
+    panel.background = element_blank(),
+    axis.title.x = element_blank()
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1200),
+    expand = c(0, 0),
+    breaks = c(0, 250, 500, 750, 1000)
+  )
 
 ## Set size figure
 
 set_size <- sig_genes_df |>
-      pivot_longer(cols = -target) |>
-      filter(value) |>
-      summarise(.by = name,
-                setsize = sum(value)) |>
+  pivot_longer(cols = -target) |>
+  filter(value) |>
+  summarise(.by = name, setsize = sum(value)) |>
 
-     ggplot(aes(x = setsize, y = name)) +
-      geom_bar(stat = "identity", width = 0.6,
-               aes(fill = name)) +
-      geom_text(position = position_nudge(x = 450),
-                aes(label = setsize),
-                size = 3) +
-      scale_x_continuous(limits = c(0, 4000),
-                         expand = c(0,0))  +
-      scale_fill_manual(values = c(
+  ggplot(aes(x = setsize, y = name)) +
+  geom_bar(stat = "identity", width = 0.6, aes(fill = name)) +
+  geom_text(
+    position = position_nudge(x = 450),
+    aes(label = setsize),
+    size = 3
+  ) +
+  scale_x_continuous(limits = c(0, 4000), expand = c(0, 0)) +
+  scale_fill_manual(
+    values = c(
+      alpha(colors[4], 0.7),
+      alpha(colors[1], 0.7),
+      alpha(colors[1], 0.7),
+      alpha(colors[2], 0.7),
+      alpha(colors[2], 0.7)
+    )
+  ) +
+  theme(
+    axis.title = element_blank(),
+    panel.background = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line.x = element_blank(),
+    legend.position = "none"
+  )
 
-                  alpha(colors[4], 0.7),
-                  alpha(colors[1], 0.7),
-                  alpha(colors[1], 0.7),
-                  alpha(colors[2], 0.7),
-                  alpha(colors[2], 0.7)
 
-      ))  +
-            theme(axis.title = element_blank(),
-                  panel.background = element_blank(),
-                  axis.text = element_blank(),
-                  axis.ticks = element_blank(),
-                  axis.line.x = element_blank(),
-                  legend.position = "none")
-
-
-
-p2 <- plot_grid(upset,
-          plot_grid(NULL, set_size,NULL,
-                    rel_heights = c(1, 0.62, 0.01),
-                    ncol = 1),
-          rel_widths = c(1, 0.3),
-          ncol = 2)
-
+p2 <- plot_grid(
+  upset,
+  plot_grid(NULL, set_size, NULL, rel_heights = c(1, 0.62, 0.01), ncol = 1),
+  rel_widths = c(1, 0.3),
+  ncol = 2
+)
 
 
 # 04. GSEA Analaysis #######################################################
@@ -711,4 +723,3 @@ ggsave(
   width = 170,
   units = "mm"
 )
-

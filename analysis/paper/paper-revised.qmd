@@ -85,7 +85,7 @@ editor_options:
 library(tidyverse)
 library(seqwrap)
 library(seqwrappaper)
-
+library(gt)
 
 show_figures <- TRUE
 
@@ -174,6 +174,11 @@ m1 <- seqwrap_compose(
 
 
 ```{r}
+#| label: tbl-m1-data 
+#| tbl-cap: "Example rows and column from the count data frame used for preparing the seqwrap container object."
+
+
+
 set.seed(100)
 
 
@@ -184,11 +189,20 @@ gene_example <- seqwrappaper::pillon_counts$countdata |>
       mutate(`[...]` = rep("[...]", 6)) |> 
       mutate(across(starts_with("GSM"), as.character)) |> 
       add_row(geneid= "[...]", GSM6107906= "[...]", GSM6107907= "[...]", GSM6107908 = "[...]", `[...]` = "[...]")
+
+
+gene_example |> 
+      gt()
+
+
+
+
 ```
 
 
 ```{r}
-
+#| label: tbl-m1-metadata 
+#| tbl-cap: "Example rows and column from the metadata data frame used for preparing the seqwrap container object."
 
 # Display a metadata set example
 
@@ -197,7 +211,8 @@ metadata_example <- seqwrappaper::pillon_counts$metadata |>
        add_row(seq_sample_id = "[...]", group = "[...]", id = "[...]", time = "[...]") 
 
 
-
+metadata_example |> 
+      gt()
 
 ```
 
@@ -540,30 +555,61 @@ summaries <- lapply(models_data[1:5], seqwrap_summarise, verbose = FALSE)
 
 
 # Extract successful models
-targets_models <- bind_rows(
-  summaries$m1_results$evaluations |>
-    mutate(model = "m1"),
-  summaries$m2_results$evaluations |>
-    mutate(model = "m2"),
-  summaries$m3_results$evaluations |>
-    mutate(model = "m3"),
-  summaries$m4_results$evaluations |>
-    mutate(model = "m4"),
-  summaries$m5_results$evaluations |>
-    mutate(model = "m5")
-) |>
 
-  # Filter singular fits and bad convergence
-  filter(!(model == "m3" & isSingular == TRUE)) |>
-  # Poisson and NB models do not have pdHess == FALSE or convergence != 0
-  # but for failsafe
-  filter(
-    !(model %in%
-      c("m1", "m2", "m4", "m5") &
-      (pdHess == FALSE | convergence != 0))
-  ) |>
-  group_by(model) |>
-  distinct(target)
+# Model 1, 2, 4, and 5, evaluate the evaluations
+n_fail <- bind_rows(
+      summaries$m1_results$evaluations |> 
+      mutate(model = "m1"),
+      summaries$m2_results$evaluations |> 
+            mutate(model = "m2"),
+
+      summaries$m4_results$evaluations |> 
+            mutate(model = "m4"),
+      summaries$m5_results$evaluations |> 
+            mutate(model = "m5")) |> 
+      filter(convergence == 1 | pdHess == FALSE) |> 
+      summarise(.by = model, 
+                n = n()) |> 
+   # For model m3, is singular is the main culprit   
+      bind_rows(
+            
+            summaries$m3_results$evaluations |> 
+            mutate(model = "m3") |>
+      
+      filter(isSingular == "TRUE") |> 
+      summarise(.by = model, 
+                n = n())) 
+
+
+
+
+
+targets_models <- bind_rows(
+      summaries$m1_results$evaluations |> 
+      mutate(model = "m1"),
+      summaries$m2_results$evaluations |> 
+            mutate(model = "m2"),
+
+      summaries$m4_results$evaluations |> 
+            mutate(model = "m4"),
+      summaries$m5_results$evaluations |> 
+            mutate(model = "m5")) |> 
+      filter(convergence == 0 | pdHess == TRUE) |> 
+      group_by(model) |> 
+      distinct(target) |> 
+      ungroup() |>  
+
+   # For model m3, is singular is the main culprit   
+      bind_rows(
+            
+            summaries$m3_results$evaluations |> 
+            mutate(model = "m3") |>
+      
+      filter(isSingular == "FALSE") |> 
+     group_by(model) |> 
+      distinct(target) |> 
+           ungroup())
+
 
 
 stat <- bind_rows(
@@ -820,7 +866,7 @@ full_errors <- dplyr::bind_rows(lapply(full_list, `[[`, "errors"))
 full_meta <- dplyr::bind_rows(lapply(full_list, `[[`, "meta"))
 
 rm(full_list)
-gc()
+gc(verbose = FALSE)
 
 # `reml` in the evaluation slot is read off the fit object, not off the arm
 # name (see eval_fun in the script), so this is the check that the arm
@@ -873,9 +919,11 @@ n_fit_issues <- full_errors |>
 
 ```
 
-[Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by the Satterthwaite method, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 A). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 B). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 C).]{custom-style="edits"}     
+[Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by Satterthwaite's method for approximating the denominator degrees of freedom, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 B). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 B). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 C).]{custom-style="edits"}     
 
-The full data sets were fitted with a low rate of convergence issues; out of a total of `r nfits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues.
+Following the permutation experiment, we used the most appropriate models (REML estimator) to model the full data sets. Both model types ($beta; and M value models) were fitted with a low rate of convergence issues; out of a total of `r n_fits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues, for the &beta; and M value models, respectively. Among successful fits, the estimated effect sizes (M-value units) indicated that overall effects in the data set were small (@fig-figure5 E). Indeed, after p-value adjustment (False discovery rate < 0.05), no sites could be declared as differentially methylated.
+
+Finally, we assessed the time cost of running seqwrap across different model specifications and found that for a given model specification, elapsed time scaled linearly with the number of targets in the data set (@fig-figure5 F). Using smaller subsets of the full data sets (number of targets $\le$ 4000) we could predict the final computational cost for the full data sets (m = `r n_fits` targets) within 5% (@fig-figure5 G).   
 
 
 
@@ -884,12 +932,24 @@ The full data sets were fitted with a low rate of convergence issues; out of a t
 #| echo: false
 #| message: false
 #| warning: false
-#| fig-cap: "(A) Distribution of &beta; values in the DNA methylation data set and categories used for creating the plasmode data set. Methylation sites were sampled with equal probability from each catogory. (B) Error rates across &beta; categories for the two candidate models (Gaussian on M-values and beta regression using &btea; values) averaged over model terms. Error bars represents 95% confidence intervals created from between iteration standard errors."
+#| fig-cap: "(A) Distribution of &beta; values in the DNA methylation data set and categories used for creating the plasmode data set. Methylation sites were sampled with equal probability from each catogory. (B) Error rates across &beta; categories for the two candidate models (Gaussian on M-values and beta regression using &beta; values), using either restricted maximum likelihood (REML) or maximum likelihood (ML) p-values derived using Wald p-values or the Satterthwaite-corrected p-values, averaged over model terms. Error bars represents 95% confidence intervals created from between iteration standard errors. (C) Median standard errors estimated from each category for each model and estimator. (D) Size adjusted power for each model determined using REML and p-values derived after Satterthwaite's correction. (E) Distribution of effect sizes in the full data set for each contrast. (F) Timing of seqwrap runs using subsets of the complete data set. Each subset was run three times and a linear model was fitted (lines) indicating linear scaling of computation time to data set size. Computational time required for running the full data set was predicted within ~ 5% indicating (G). "
 #| fig-width: 6.69
 #| fig-height: 7.87
 #| out-width: "170mm"
 #| out-height: "200mm"
 #| label: fig-figure5
+
+
+if (show_figures) {
+  figure5 <- readRDS(here::here("analysis/figures/figure-5.RDS"))
+  figure5
+}
+
+
+
+
+
+
 ```
 
 

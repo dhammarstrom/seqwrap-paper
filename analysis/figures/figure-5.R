@@ -66,6 +66,10 @@ lab_betacat <- function(x) {
 }
 
 
+axis_title_size <- 8
+axis_text_size <- 8
+
+
 # 01. Beta categories used for the permutation test  #########################
 
 # list files in permutation results folder
@@ -190,6 +194,7 @@ fig1 <- dd |>
 
   theme_classic() +
   theme(
+    axis.text = element_text(size = axis_text_size),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
     axis.line.y = element_blank(),
@@ -278,6 +283,7 @@ fig2 <- null_dat |>
   labs(x = "*p*-value", y = "Density") +
 
   theme(
+    axis.text = element_text(size = axis_text_size),
     strip.text = ggtext::element_markdown(
       hjust = 0,
       margin = margin(t = 1, b = 1, unit = "pt")
@@ -288,7 +294,7 @@ fig2 <- null_dat |>
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
     axis.line.y = element_blank(),
-    axis.title.x = ggtext::element_markdown()
+    axis.title.x = ggtext::element_markdown(size = axis_text_size)
   )
 
 
@@ -391,21 +397,23 @@ fig3 <- model_error_type1_betacat |>
   ggh4x::facet_wrap2(~betacat, ncol = 5, strip = strip) +
   theme_classic() +
   theme(
-    axis.text.x = ggtext::element_markdown(),
+    axis.text = element_text(size = axis_text_size),
+    axis.text.x = ggtext::element_markdown(size = axis_text_size),
     legend.position = "right",
     legend.position.inside = c(0.75, 0.15),
     legend.background = element_rect(),
     legend.text = element_text(size = 8),
     legend.direction = "vertical",
     legend.title = element_blank(),
-    axis.title.x = element_blank()
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = axis_title_size)
   ) +
 
   scale_shape_manual(values = c(21, 24, 23)) +
   scale_fill_manual(values = colors) +
   scale_y_continuous(
     breaks = c(2.5, 5, 7.5, 10),
-    limits = c(2.5, 10),
+    limits = c(4, 10),
     expand = c(0, 0)
   ) +
   scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
@@ -457,6 +465,13 @@ se_stratum <- se_dat |>
   )
 
 
+# Annotation
+se_annotation <- se_stratum |>
+  dplyr::mutate(model = lab_model(model), betacat = lab_betacat(betacat)) |>
+  filter(iter == 1, betacat == "0 - 0.2") |>
+  mutate(med_se = if_else(grepl("REML", model), med_se + 0.013, med_se - 0.005))
+
+
 fig4 <- se_stratum |>
   dplyr::mutate(model = lab_model(model), betacat = lab_betacat(betacat)) |>
 
@@ -473,16 +488,29 @@ fig4 <- se_stratum |>
   ggh4x::facet_wrap2(~betacat, ncol = 5, strip = strip) +
   theme_classic() +
   theme(
+    axis.text = element_text(size = axis_text_size),
     axis.title.x = ggtext::element_markdown(),
-    axis.title.y = ggtext::element_markdown(),
-    legend.text = ggtext::element_markdown(),
+    legend.position = "none",
     strip.text = element_blank(),
-    legend.title = element_blank(),
-    axis.text.x = element_blank()
-  ) +
-  scale_fill_manual(values = colors) +
 
-  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+    axis.text.x = element_blank(),
+    axis.title.y = ggtext::element_markdown(size = axis_title_size),
+    axis.ticks.x.bottom = element_blank()
+  ) +
+
+  ggtext::geom_richtext(
+    data = se_annotation,
+    aes(model, med_se, label = model),
+    fill = NA,
+    label.color = NA, # remove background and outline
+    label.padding = grid::unit(rep(0, 4), "pt"), # remove padding
+    size = 2.5
+  ) +
+
+  scale_fill_manual(values = colors) +
+  scale_y_continuous(limits = c(0.09, 0.15), expand = 0) +
+
+  scale_x_discrete(sec.axis = dup_axis()) +
   labs(x = NULL, y = "Standard error<br>(M-value units)")
 
 
@@ -643,11 +671,15 @@ fig5 <- power_sign |>
   ggh4x::facet_grid2(~Model) +
   theme_classic() +
   theme(
+    axis.text = element_text(size = axis_text_size),
     legend.position = "right",
     legend.title = element_blank(),
-    legend.text = ggtext::element_markdown(),
-    axis.title.x = ggtext::element_markdown(),
+    legend.text = ggtext::element_markdown(size = axis_title_size),
+    axis.title.x = ggtext::element_markdown(size = axis_title_size),
+    axis.title.y = ggtext::element_markdown(size = axis_title_size),
+    axis.text.x = element_text(size = axis_text_size),
     strip.text = ggtext::element_markdown(hjust = 0),
+    legend.key.spacing.y = unit(-2, 'mm'),
     strip.background = element_blank(),
   ) +
   scale_colour_manual(values = colors) +
@@ -660,7 +692,7 @@ fig5 <- power_sign |>
   scale_fill_manual(values = colors) +
   labs(
     x = "Added effect (&delta;, M-value)",
-    y = "Size-adjusted\npower (%)"
+    y = "Size-adjusted<br>power (%)"
   )
 
 
@@ -798,25 +830,47 @@ full_terms <- setdiff(unique(full_dat$term), "(Intercept)")
 # Combine the full results for the target models
 res <- full_dat |>
   filter(estimator == "REML") |>
-  filter(term %in% c("time3_loading", "time4_unloading", "time5_reloading")) |>
+  filter(
+    term %in%
+      c("time2_acute", "time3_loading", "time4_unloading", "time5_reloading")
+  ) |>
   mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate))
 
+d <- res
 
-results1 <- res |>
-  filter(model == "beta_reml") |>
+density_fun <- function(d, TERM) {
+  dd <- filter(d, term == TERM) |>
+    pull(est_M) |>
+    density(from = -1, to = 1)
+
+  data.frame(x = dd$x, y = dd$y) |>
+    mutate(time = TERM)
+}
+
+
+results1 <- bind_rows(
+  density_fun(res, "time2_acute"),
+  density_fun(res, "time3_loading"),
+  density_fun(res, "time4_unloading"),
+  density_fun(res, "time5_reloading")
+) |>
 
   mutate(
-    term = case_when(
-      term == "time3_loading" ~ "Loading",
-      term == "time4_unloading" ~ "Unloading",
-      term == "time5_reloading" ~ "Reloading"
+    time = case_when(
+      time == "time2_acute" ~ "Acute",
+      time == "time3_loading" ~ "Loading",
+      time == "time4_unloading" ~ "Unloading",
+      time == "time5_reloading" ~ "Reloading"
     ),
-    term = factor(term, levels = c("Loading", "Unloading", "Reloading"))
+    time = factor(
+      time,
+      levels = c("Acute", "Loading", "Unloading", "Reloading")
+    )
   ) |>
 
-  ggplot(aes(est_M)) +
-  geom_line(stat = "density") +
-  facet_wrap(~term) +
+  ggplot(aes(x, y)) +
+  geom_line() +
+  facet_wrap(~time, ncol = 4) +
   scale_x_continuous(
     limits = c(-1, 1),
     breaks = c(-0.8, -0.4, 0, 0.4, 0.8),
@@ -824,40 +878,42 @@ results1 <- res |>
   ) +
   theme_classic() +
   theme(
+    axis.text = element_text(size = axis_text_size),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
     axis.line.y = element_blank(),
     axis.text.y = element_blank(),
+    axis.text.x = element_text(size = axis_text_size),
     strip.background = element_blank(),
-
-    strip.text = element_text(hjust = 0)
+    axis.title.x = ggtext::element_markdown(size = axis_title_size),
+    strip.text = element_text(hjust = 0, size = axis_title_size)
   ) +
   labs(x = "Estimated effects (M-value units)")
 
 
-full_errors |>
-  filter(stage == "fit") |>
-  summarise(.by = c(type, model), n = n()) |>
-  mutate(percentage = n / n_full_sites) |>
-  print()
-
-full_errors |>
-  distinct(message)
-
-
-res |>
-
-  mutate(.by = c(model, term), fdr = p.adjust(p_satt, method = "fdr")) |>
-
-  filter(p_satt < 0.05) |>
-
-  mutate(sign = if_else(estimate > 0, "up", "down")) |>
-  summarise(.by = c(term, model, sign), n = n()) |>
-  mutate(identity = if_else(sign == "up", n, -n)) |>
-  ggplot(aes(term, identity, fill = model)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_hline(yintercept = 0)
-
+# full_errors |>
+#   filter(stage == "fit") |>
+#   summarise(.by = c(type, model), n = n()) |>
+#   mutate(percentage = n / n_full_sites) |>
+#   print()
+#
+# full_errors |>
+#   distinct(message)
+#
+#
+# res |>
+#
+#   mutate(.by = c(model, term), fdr = p.adjust(p_satt, method = "fdr")) |>
+#
+#   filter(p_satt < 0.05) |>
+#
+#   mutate(sign = if_else(estimate > 0, "up", "down")) |>
+#   summarise(.by = c(term, model, sign), n = n()) |>
+#   mutate(identity = if_else(sign == "up", n, -n)) |>
+#   ggplot(aes(term, identity, fill = model)) +
+#   geom_bar(stat = "identity", position = position_dodge()) +
+#   geom_hline(yintercept = 0)
+#
 
 # 06. Timing experiment #####################################################
 
@@ -999,22 +1055,24 @@ time1 <- timing_cells |>
   annotate(
     "text",
     x = 3000,
-    y = start_up + 10,
+    y = start_up + 15,
     label = "Start-up cost",
     color = "gray40",
-    size = 3
+    size = 2.5
   ) +
 
   theme(
+    axis.text.x = element_text(size = axis_text_size),
     legend.text = ggtext::element_markdown(),
-    legend.position = "none"
+    legend.position = "none",
+    axis.title = element_text(size = axis_title_size),
   )
 
 
 # Obs and pred for top costing model
 annotation_time <- timing_tab |>
   filter(arm == "beta_reml") |>
-  select(observed_h, predicted_h) |>
+  dplyr::select(observed_h, predicted_h) |>
   pivot_longer(cols = everything()) |>
   mutate(
     name = gsub("_h", "", name),
@@ -1057,7 +1115,11 @@ time2 <- timing_tab |>
 
   scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = colors) +
-  scale_y_continuous(limits = c(2, 12), expand = c(0, 0)) +
+  scale_y_continuous(
+    limits = c(2, 12),
+    expand = c(0, 0),
+    sec.axis = dup_axis()
+  ) +
 
   labs(x = "", y = "Elapsed time\n(hours)") +
 
@@ -1067,16 +1129,46 @@ time2 <- timing_tab |>
     fill = NA,
     label.color = NA, # remove background and outline
     label.padding = grid::unit(rep(0, 4), "pt"), # remove padding)
-    size = 3.5,
+    size = 2.5,
   ) +
   theme_classic() +
-  theme(legend.position = "none") +
+  theme(
+    axis.text = element_text(size = axis_text_size),
+    legend.position = "none",
+    axis.text.y.left = element_blank(),
+    axis.ticks.y.left = element_blank(),
+    axis.line.y.left = element_blank(),
+    axis.title.y.left = element_blank(),
+    axis.text.y.right = element_text(size = axis_text_size),
+    axis.title.y.right = element_text(size = axis_text_size)
+  ) +
   annotate(
     "text",
-    x = 0.7,
-    y = annotation_time$value,
+    x = 0.65,
+    y = annotation_time$value + c(0.5, -0.5),
     label = annotation_time$name,
-    size = 3,
+    size = 2.5,
+    color = "gray40"
+  ) +
+  annotate(
+    "curve",
+    y = annotation_time$value[1] + 0.3,
+    x = 0.8,
+    yend = annotation_time$value[1] + c(-0.1),
+    xend = 0.95,
+    curvature = c(-0.2),
+    arrow = arrow(type = "closed", length = unit(2, "mm")),
+    color = "gray40"
+  ) +
+
+  annotate(
+    "curve",
+    y = annotation_time$value[2] - 0.3,
+    x = 0.8,
+    yend = annotation_time$value[2] + c(0.1),
+    xend = 0.95,
+    curvature = c(0.2),
+    arrow = arrow(type = "closed", length = unit(2, "mm")),
     color = "gray40"
   )
 
@@ -1091,23 +1183,35 @@ figure5 <- cowplot::plot_grid(
     align = "v",
     axis = "lr",
     ncol = 1,
-    rel_heights = c(0.4, 1, 0.6, 0.8),
-    labels = c("", "", "B", "C"),
-    label_y = 1.2
+    rel_heights = c(0.4, 1, 0.6, 0.8)
   ),
-  cowplot::plot_grid(NULL, fig5, results1, rel_widths = c(0.1, 1, 1), ncol = 3),
+  cowplot::plot_grid(
+    NULL,
+    fig5,
+    results1,
+    rel_widths = c(0.1, 1, 1),
+    ncol = 3,
+    hjust = 0.8
+  ),
   cowplot::plot_grid(
     NULL,
     time1,
     time2,
     NULL,
+    align = "h",
+    axis = "lr",
     rel_widths = c(0.1, 0.9, 0.6, 0.1),
     ncol = 4
   ),
   ncol = 1,
-  rel_heights = c(1.5, 0.5, 0.5),
-  labels = c("A", "D")
-)
+  rel_heights = c(1.5, 0.5, 0.5)
+) +
+  annotate(
+    "text",
+    x = c(0.03, 0.03, 0.03, 0.03, 0.5, 0.03, 0.6),
+    y = c(0.98, 0.85, 0.57, 0.37, 0.37, 0.2, 0.2),
+    label = c("A", "B", "C", "D", "E", "F", "G")
+  )
 
 
 saveRDS(figure5, here::here("analysis/figures/figure-5.RDS"))
