@@ -649,7 +649,7 @@ y <- data.frame(y = m_vals[sample(1:nrow(m_vals), 1),]) |>
 # Organizing the data into aformat suitable for single model 
 # fit. 
 dat <- metadata |> 
-      select(geo_accession, participant, time) |> 
+      dplyr::select(geo_accession, participant, time) |> 
       inner_join(y) |>
       # Permutation of time within participant
       group_by(participant) |> 
@@ -706,6 +706,9 @@ fits[[4]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant),
                           data = dat, 
                           REML = TRUE,
                           family = glmmTMB::beta_family)
+
+
+
 
 
 
