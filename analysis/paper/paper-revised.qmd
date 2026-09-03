@@ -111,7 +111,7 @@ Here, we present seqwrap, an R package that provides a flexible, high-level wrap
 
 ### Features of the seqwrap R package
 
-seqwrap is built entirely in R and designed to iteratively apply a user-defined regression model to each row (representing targets) of a data matrix populated with data such as those derived from quantification of genes, proteins, or other omics-type quantities (@fig-overview). Each column in the data matrix represents a sample, and the sample metadata is combined with the target-wise data to enable modelling with established R-based packages such as lme4, nlme, and glmmTMB. This approach enables the user to obtain target-specific estimates from a specified statistical model for downstream analyses, such as differential expression or gene set enrichment analyses. Compared to similar packages like glmmseq and lmerseq[@lewis_glmmseq_2022, @vestal_lmerseq_2022], seqwrap is designed to enable the user to select a suitable model function (e.g., `lmer` or `glmmTMB`) and specify options to allow for analysis using different distributional assumptions and any combination of fixed and random effects available in the modelling framework of choice. Currently, seqwrap has been tested for compatibility with several R-based regression modelling packages extending item-by-item high-dimensional data analysis to include flexible correlation structures and multiple response distributions (@tbl-packcomp). [As such, seqwrap supports the implementation of any hierarchical structure supported by these modelling algorithms in the syntax implemented by the algorithms]{custom-style="edits"}. Notably, using `glmmTMB` as the modeling function will allow for flexible specifications of random effects and response distributions. Additionally, priors can be used to estimate a (regularized) maximum a posteriori estimate (see Case Study). seqwrap also enables the definition of custom functions for post-fitting diagnostics and analysis.
+seqwrap is built entirely in R and designed to iteratively apply a user-defined regression model to each row (representing targets) of a data matrix populated with data such as those derived from quantification of genes, proteins, or other omics-type quantities (@fig-overview). Each column in the data matrix represents a sample, and the sample metadata is combined with the target-wise data to enable modelling with established R-based packages such as lme4, nlme, and glmmTMB. This approach enables the user to obtain target-specific estimates from a specified statistical model for downstream analyses, such as differential expression or gene set enrichment analyses. Compared to similar packages like glmmseq and lmerseq[@lewis_glmmseq_2022, @vestal_lmerseq_2022], seqwrap is designed to enable the user to select a suitable model function (e.g., `lmer` or `glmmTMB`) and specify options to allow for analysis using different distributional assumptions and any combination of fixed and random effects available in the modelling framework of choice. Currently, seqwrap has been tested for compatibility with several R-based regression modelling packages extending item-by-item high-dimensional data analysis to include flexible correlation structures and multiple response distributions (@tbl-packcomp). [As such, seqwrap supports the implementation of any hierarchical structure supported by these modelling algorithms using the syntax of the chosen modeling package]{custom-style="edits"}. Notably, using `glmmTMB` as the modeling function will allow for flexible specifications of random effects and response distributions. Additionally, priors can be used to estimate a (regularized) maximum a posteriori estimate (see Case Study). seqwrap also enables the definition of custom functions for post-fitting diagnostics and analysis.
 
 | Package | Response distributions | Additional features | [Hierarchical structures supported^1^]{custom-style="edits"} |
 |------------------|------------------|------------------|------------------|
@@ -126,7 +126,9 @@ seqwrap is built entirely in R and designed to iteratively apply a user-defined 
 
 ![Overview of the main functions in the `seqwrap` package. `seqwrap_compose` is used to populate a `swcontainer` object with data (*m* targets, *n* samples, and optionally *q* outcome variables), sample metadata (*n* sample and *k* covariates, including sample name), and optionally, target-wise data (targetdata, *m* data frames with *d* variables and *p* rows) in addition to the model function and its arguments. `seqwrap_compose` expects a sample name to indicate the variable name in the metadata containing sample identifications. The user may specify custom summary and evaluation functions. `seqwrap` uses the populated `swcontainer` to iterate over all m targets using the defined model. To combine results from seqwrap, `seqwrap_summarise` collects all results into two data frames suitable for downstream analysis.](img/overview.png){#fig-overview}
 
-The package implements three core functions: `seqwrap_compose`, `seqwrap`, and `seqwrap_summarise` (@fig-overview, see below and supplementary material for code examples). `seqwrap_compose` accepts as input the required data sets (the high-dimensional data, sample metadata, and optionally, target-wise metadata), a selected modeling algorithm together with its arguments, and the name of the sample id variable (sample name). While the metadata remains the same across all iterations, `targetdata` provides an additional data set for target-specific values to each model. Such values could be fixed parameter values, such as dispersion values for negative binomial models estimated from preliminary models, or priors for regularizing parameters in models that allow for *maximum a posteriori* estimates (see below for an example). When the input data is a single data frame with each row representing a target and each column representing a sample, the target-specific outcome data will be represented by the letter `y` when specifying the model formula in the arguments (e.g., `formula = y ~ 1`). Data can also be supplied to `seqwrap_compose` as a named list of data frames. In this case, target-specific variables will be represented by their names and will be available for specifying a formula used by the modeling algorithm. [Importantly, the user must ensure that any required pre-processing steps are carried out before modelling as seqwrap does not include pre-processing functionality. Pre-processing, such as quality control, filtering, normalization or transformations, depending on the nature of the data, must therefore be done using appropriate tools such as, e.g., `edgeR` for library size calculations in an RNA-seq workflow [@robinson2010],  `minfi` for pre-processing Illumina methylation arrays [@fortin2014], or `QFeatures` [@qfeatures] for quantifying features in a proteomic workflow.]{custom-style="edits"}
+### Core functions
+
+The package implements three core functions: `seqwrap_compose`, `seqwrap`, and `seqwrap_summarise` (@fig-overview, see below and supplementary material for code examples). `seqwrap_compose` accepts as input the required data sets (the high-dimensional data, sample metadata, and optionally, target-wise metadata), a selected modeling algorithm together with its arguments, and the name of the sample id variable (sample name). While the metadata remains the same across all iterations, `targetdata` provides an additional data set for target-specific values to each model. Such values could be fixed parameter values, such as dispersion values for negative binomial models estimated from preliminary models, or priors for regularizing parameters in models that allow for *maximum a posteriori* estimates (see below for an example). When the input data is a single data frame with each row representing a target and each column representing a sample, the target-specific outcome data will be represented by the letter `y` when specifying the model formula in the arguments (e.g., `formula = y ~ 1`). Data can also be supplied to `seqwrap_compose` as a named list of data frames. In this case, target-specific variables will be represented by their names and will be available for specifying a formula used by the modeling algorithm. [Importantly, the user must ensure that any required pre-processing steps are carried out before modelling as seqwrap does not include pre-processing functionality. Pre-processing, such as quality control, filtering, normalization or transformations, depending on the nature of the data, must therefore be done using appropriate tools, e.g., `edgeR` for library size calculations in an RNA-seq workflow [@robinson2010], `minfi` for pre-processing Illumina methylation arrays [@aryee2014], or `QFeatures` [@qfeatures] for quantifying features in a proteomic workflow.]{custom-style="edits"}
 
 The metadata should include all design variables used to define the model formula, as well as the variable containing the sample names corresponding to the data columns. `seqwrap_compose` also expects a list of arguments for the selected modeling function, including the model formula and additional arguments, such as those used to specify a distributional model in generalized linear models. Optionally, the user may specify functions for model summaries and evaluations, load these into the computing environment and reference them in `seqwrap_compose`. When the user does not provide custom summary or evaluation functions, the default summary and evaluation functions will provide tabular summaries of all parameter estimates (summary function) and, if available for the selected modeling algorithm, model assumptions checks (evaluation function). `seqwrap` will use custom or defined summary and evaluation functions to evaluate fitted model objects.
 
@@ -134,6 +136,7 @@ When combining all input into a `swcontainer` object, `seqwrap_compose` performs
 
 After iterating over the data set, `seqwrap` displays a compact summary of any errors, warnings, and messages returned by the selected modeling algorithm, along with those returned from the default or user-specified summary and evaluation functions. All errors, warnings, and messages are stored in a tabular format in the result object (`seqwrap_results`) available for inspection. The results object also contains all model outputs created by the evaluation and summary functions. Models that fail to produce output (e.g., due to non-convergence) are removed from the model summaries. The `seqwrap_summarise` function collects all summaries into two data frames for further downstream analysis.
 
+<!-- Model that fail are removed from the summary also in > 0.8.0 -->
 
 ## Case studies
 
@@ -141,7 +144,7 @@ After iterating over the data set, `seqwrap` displays a compact summary of any e
 
 Pillon et al. [@pillon2022] investigated gene expression profiles in individuals with type 2 diabetes and healthy control individuals in response to a standardized exercise session. RNA was extracted from muscle biopsy samples obtained before, immediately after, and after a 3-hour recovery (two groups, three time-points). Paired-end RNA-sequencing was performed, and the data were submitted to the Gene Expression Omnibus (GSE202295). Here we have downloaded the available raw counts matrix data, which has been processed into counts from raw reads by NCBI. Raw read counts were filtered to retain target genes with at least 10 counts in 70% of samples for each group-time-point combination.
 
-Using the data from Pillon et al. [@pillon2022], we are interested in baseline differences in gene expression profiles between individuals with type 2 diabetes and healthy controls. Additionally, we want to determine differences in responses to the exercise session. Since the data have been collected using a repeated-measures design, in which samples are obtained from the same individuals at three time points, we use a mixed-effects model to directly obtain estimates of the baseline differences and the differences between groups in changes from baseline, while controlling for correlations among samples due to the repeated design using a varying intercept per participant (random intercept). [Using a negative binomial (NB2) distribution for count data, we construct preliminary models for the conditional mean ($\mu_{gi}$) of gene *g* (*g* = 1, ..., *m*; the *m* rows of the `data` matrix in @fig-overview), where each observation (*i* = 1, ..., *n*; the *n* sample columns of `data`) is taken from a particular participant *j*[*i*] (*j* = 1, ..., *J*) at three time points (baseline, post-exercise (*t2*), and recovery (*t3*), where $\text{time}_{t2}$ and $\text{time}_{t3}$ are dummy variables relative to the baseline reference) belonging to one of two disease groups (normal glucose tolerance (*NGT*) and *diabetes* where *NGT* is the reference level). The model parameters $\beta_{0g}$ to $\beta_{5g}$ capture the intercept, the main effects of group and time, and their interactions. A gene-specific random intercept ($b_{g,j[i]}$, normally distributed with SD $\sigma_g$) accounts for participant-level correlation; because each of the *m* targets is fitted in a separate model, these participant intercepts are estimated per gene. An observation level offset $\operatorname{log}(\text{s}_i)$ accounts for differences in library size, where *s~i~* is the TMM-normalized library size [@robinson2010] divided by the median normalized library size. The NB2 distribution includes a dispersion parameter ($\theta_g$) to capture overdispersion.]{custom-style="edits"}
+Using the data from Pillon et al. [@pillon2022], we are interested in baseline differences in gene expression profiles between individuals with type 2 diabetes and healthy controls. Additionally, we want to determine differences in responses to the exercise session. Since the data have been collected using a repeated-measures design, in which samples are obtained from the same individuals at three time points, we use a mixed-effects model to directly obtain estimates of the baseline differences and the differences between groups in changes from baseline, while controlling for correlations among samples due to the repeated design using a varying intercept per participant (random intercept). [Using a negative binomial (NB2) distribution for count data, we construct preliminary models for the conditional mean ($\mu_{gi}$) of gene *g* (*g* = 1, ..., *m*; the *m* rows of the `data` matrix in @fig-overview), where each observation (*i* = 1, ..., *n*; the *n* sample columns of `data`) is taken from a particular participant $j[i]$ (*j* = 1, ..., *J*) at three time points (baseline, post-exercise (*t2*), and recovery (*t3*), where $\text{time}_{t2}$ and $\text{time}_{t3}$ are dummy variables relative to the baseline reference) belonging to one of two disease groups (normal glucose tolerance (*NGT*) and *diabetes* where *NGT* is the reference level). The model parameters $\beta_{0g}$ to $\beta_{5g}$ capture the intercept, the main effects of group and time, and their interactions. A gene-specific random intercept ($b_{g,j[i]}$, normally distributed with SD $\sigma_g$) accounts for participant-level correlation; because each of the *m* targets is fitted in a separate model, these participant intercepts are estimated per gene. An observation level offset $\operatorname{log}(\text{s}_i)$ accounts for differences in library size, where *s~i~* is the TMM-normalized library size [@robinson2010] divided by the median normalized library size. The NB2 distribution includes a dispersion parameter ($\theta_g$) to capture overdispersion.]{custom-style="edits"}
 
 $$
 \begin{align}
@@ -157,7 +160,43 @@ $$ {#eq-model-1}
 
 Our model uses the parameterization $\text{Var}(Y_{gi}) = \mu_{gi} + \frac{\mu_{gi}^2}{\theta_{g}}$ so that $\theta_{g}$ represents the gene-specific inverse dispersion (as implemented in the glmmTMB package as `nbinom2`).
 
-[Using the seqwrap package, we can define the code needed to run the model described in @eq-model-1 using the `seqwrap_compose` function (@lst-usage-m1). In the most basic setup, `seqwrap_compose` assembles required inputs for model fitting into a validated `swcontainer` object, which serves as the primary input to `seqwrap` for iterative model fitting. Required inputs include the model-fitting function (`modelfun`, e.g., `glmmTMB::glmmTMB`), the high-dimensional data, which in this case is a data frame with the first column holding the target names (@tbl-m1-data), the sample metadata (@tbl-m1-metadata), the name of the sample identifier variable (`samplename`), and a list of arguments to be passed to the model fitting function (`arguments`). These arguments must follow the conventions and syntax expected by the selected modeling framework. Optionally, the user can write custom summary and evaluation functions which will be used to evaluate the fitted model in each iteration. Here we add a custom evaluation function to capture the estimated dispersion parameter, which glmmTMB stores in the standard deviation report (in the `sdr` slot; see @lst-usage-m1). We construct a custom evaluation function that returns a data frame, which is subsequently combined using `seqwrap_summarise` with target identifications added per row. ]{custom-style="edits"}
+[Using the seqwrap package, we can define the code needed to run the model described in @eq-model-1 using the `seqwrap_compose` function (@lst-usage-m1). In the most basic setup, `seqwrap_compose` assembles required inputs for model fitting into a validated `swcontainer` object, which serves as the primary input to `seqwrap` for iterative model fitting. Required inputs include the model-fitting function (`modelfun`, e.g., `glmmTMB::glmmTMB`), the high-dimensional data, which in this case is a data frame with the first column holding the target names (@tbl-m1-data), the sample metadata (@tbl-m1-metadata), the name of the sample identifier variable (`samplename`), and a list of arguments to be passed to the model fitting function (`arguments`). These arguments must follow the conventions and syntax expected by the selected modeling framework. Optionally, the user can write custom summary and evaluation functions which will be used to evaluate the fitted model in each iteration. However, we use the `dispersion_evaluation` function, part of the seqwrap package, to capture the estimated dispersion parameters (@lst-usage-m1). The dispersion estimates will be used in subsequent specifications of empirical Bayes priors.]{custom-style="edits"}
+
+
+```{r}
+#| eval: false
+#| echo: false
+#| label: test-data-for-examples
+
+# We use this to test the examples 
+
+dat <- seqwrappaper::pillon_counts
+
+
+# Filter low expressed genes and combine after filtering
+keep <- edgeR::filterByExpr(
+  dat$countdata[,-1],
+  min.count = 10,
+  min.total.count = 15,
+  large.n = 10,
+  min.prop = 0.7,
+  group = paste(dat$metadata$group, dat$metadata$time))
+
+
+ln_efflibsize <- colSums(dat$countdata[keep,-1])
+
+countdat <-  dat$countdata[keep,]
+
+metadata <- dat$metadata |> 
+      mutate(ln_efflibsize = log(ln_efflibsize))
+
+
+counts <- countdat[1:200,]
+
+```
+
+
+
 
 ```{r}
 #| lst-label: lst-usage-m1
@@ -165,22 +204,11 @@ Our model uses the parameterization $\text{Var}(Y_{gi}) = \mu_{gi} + \frac{\mu_{
 #| eval: false
 
 
-custom_eval <- function(m) {
-      out <- data.frame(
-            dispersion = data.frame(summary(m$sdr))["betadisp",1],
-            dispersion.se = data.frame(summary(m$sdr))["betadisp",2],
-            log_mu = mean(predict(m, type = "link"))
-            )
-      return(out)
-}
-
-
-
 m1 <- seqwrap_compose(
       modelfun = glmmTMB::glmmTMB,
       data = counts, 
       metadata = metadata,
-      eval_fun = custom_eval,
+      eval_fun = dispersion_evaluation,
       arguments = list(
             formula = y ~ time * group + offset(ln_efflibsize) + (1|id),
             family = glmmTMB::nbinom2), 
@@ -261,6 +289,7 @@ m1_results <- seqwrap(m1,
   )
 
 
+
 m1_summaries <- seqwrap_summarise(m1_results)
 
 
@@ -306,13 +335,13 @@ b_{g,i} &\sim \operatorname{Normal}(0, \sigma_{g[\text{observations}]})
 \end{align}
 $$ {#eq-model-2}
 
-[For compactness, the intercept, the main effects of group and time, and their interactions written out in @eq-model-1 are collected into the design-matrix row $\mathbf{X}_{i}$ and the coefficient vector $\boldsymbol{\beta}_g$, so that $\mathbf{X}_{i}\boldsymbol{\beta}_g$ in @eq-model-2 and @eq-model-3 denotes the same linear combination of fixed effects.]{custom-style="edits"}
+[For compactness, the intercept, the main effects of group and time, and their interactions written out in @eq-model-1 are collected into the design-matrix row $\mathbf{X}_{i}$ and the coefficient vector $\boldsymbol{\beta}_g$, so that $\mathbf{X}_{i}\boldsymbol{\beta}_g$ in @eq-model-2 and @eq-model-4 denotes the same linear combination of fixed effects.]{custom-style="edits"}
 
 For a single gene target, the model can be fitted with the `glmmTMB` package using the Poisson family distribution and an observation-level indicator variable to add OLRE. Using `seqwrap`, the model can be readily applied to the whole gene count matrix. [The required changes to the model container used to fit model 1 (@lst-usage-m1) are accomplished by adding an observation-level random effect and changing the family argument (@lst-usage-m2). The observation-level factor corresponds to the sample name in the metadata, which makes it convenient to use this indicator for the additional random effect.]{custom-style="edits"} 
 
 ```{r}
 #| lst-label: lst-usage-m2
-#| lst-cap: "Defining Model 1 as a seqwrap container object"
+#| lst-cap: "Defining Model 2 as a seqwrap container object and initiating its run"
 #| eval: false
 
 
@@ -327,9 +356,12 @@ m2 <- seqwrap_compose(
       samplename = "seq_sample_id" 
   )
 
+m2_results <- seqwrap(m2, 
+                      cores = CORES)
+
 ```
 
-To regularize parameter estimates in the negative binomial and Poisson OLRE models, we used estimates from the non-informed models (@eq-model-1, @eq-model-2) as priors in subsequent models. This empirical Bayes approach is analogous to borrowing information across genes and to the moderation of test statistics, as implemented in popular packages for RNA-seq analysis [@efron2010; @mccarthy2012; @love_moderated_2014; @robinson_edger_2010]. Priors for variance components (*b*~*g*,*i*~ and *b*~*g*,*j*\[*i*\]~) were defined using the Gamma distribution with means estimated from non-informed models and a fixed shape parameter of 2 to avoid too much density on 0. For fixed effects (β~*g*\[*c*\]~, where *c* = 1, ..., *C* indexes the fixed-effect parameters excluding the intercept), normal distributions centered on zero were used, with standard deviations taken from the distribution of parameter estimates in the non-informed models. Finally, for the negative binomial model, a normal prior was used for the dispersion parameter, with a mean equal to the expected value from the estimated mean-dispersion relationship (local polynomial regression) from non-informed models and a standard deviation equal to the residual standard deviation of the same model. The complete model formulation for the negative binomial model is shown in @eq-model-3.
+To regularize parameter estimates in the negative binomial and Poisson OLRE models, we used estimates from the non-informed models (@eq-model-1, @eq-model-2) as priors in subsequent models. This empirical Bayes approach is analogous to borrowing information across genes and to the moderation of test statistics, as implemented in popular packages for RNA-seq analysis [@efron2010; @mccarthy2012; @love_moderated_2014; @robinson_edger_2010]. Priors for variance components (*b*~*g*,*i*~ and *b*~*g*,*j*\[*i*\]~) were defined using the Gamma distribution with means estimated from non-informed models and a fixed shape parameter of 2 to avoid too much density on 0. For fixed effects (β~*g*\[*c*\]~, where *c* = 1, ..., *C* indexes the fixed-effect parameters excluding the intercept), normal distributions centered on zero were used, with standard deviations taken from the distribution of parameter estimates in the non-informed models. Finally, for the negative binomial model, a normal prior was used for the dispersion parameter, with a mean equal to the expected value from the estimated mean-dispersion relationship (local polynomial regression) from non-informed models and a standard deviation equal to the residual standard deviation of the same model. The complete model formulation for the negative binomial model is shown in @eq-model-4.
 
 $$
 \begin{align}
@@ -341,92 +373,26 @@ b_{g,j} &\sim \operatorname{Normal}(0, \sigma_g) \\
 \beta_{g[c]} &\sim \operatorname{Normal}(0, \tau_{c}) \\
 \operatorname{log}(\theta_{g})&\sim \operatorname{Normal}(\hat{\theta}_{g}^{MLE}, \tau_g)
 \end{align}
-$$ {#eq-model-3}
+$$ {#eq-model-4}
 
-Here, we used the `glmmTMB` package [@brooks2017a] to fit models that produce *maximum a posteriori* estimates after applying independent priors on selected parameters. Because our `seqwrap` package makes target-specific data available at each iteration, we can specify target-specific priors for the negative binomial model, and common priors used in the Poisson OLRE model. [To create an informed prior for the dispersion parameter in the negative binomial model, we use the dispersion estimates returned from the custom evaluation function used in the container object for model 1 (@lst-usage-m1). We want to estimate the association between the raw mean counts per target and the log-dispersion estimate, and fit a model to these data using a local polynomial regression (`loess`). The model's predictions are used to specify the dispersion parameter prior, with the &sigma; parameter defining the standard deviation (trend_model$s in lst-usage-m3). Next, we summarise the parameter-specific estimates from the firt model (Model 1), starting with the fixed effects and the random effect. In `glmmTMB` (version 1.1.14), priors are specified as data frames with columns prior, class and coef, with the prior defined using a character specifying the distribution and parameter values (e.g., `"normal(0,1)"`). We thus need to add the distributional form to each entry in the prior data frame, along with the class (either fixed, "fixef", or random, "ranef") and the term defining the coef. Finally, since we will use the predicted association between dispersion and raw counts as the prior for the dispersion parameter, we will store each resulting data frame in a list of equal length to the number of targets (@lst-usage-m3). After setting up the priors list, we need to define a second seqwrap container for the model, corresponding to model @eq-model-3 with priors built from the non-informed estimates. Using `seqwrap_compose` and the `targetdata` argument, the list containing the target-specific priors is defined. This makes the columns of the data frames in each list slot available in each iteration. We can then reference these columns in the data frame created by the priors argument (@eq-model-3).]{custom-style="edits"}
-
-[When using the same prior for all targets, the target data can be a single data frame that is made available to seqwrap in each iteration. For model 5, the informed Poisson model, a single data frame is used to capture the estimates from the first non-informed model run.]{custom-style="edits"}
+Here, we used the `glmmTMB` package [@brooks2017a] to fit models that produce *maximum a posteriori* estimates after applying independent priors on selected parameters. Because our `seqwrap` package makes target-specific data available at each iteration, we can specify target-specific priors for the negative binomial model, and common priors used in the Poisson OLRE model. [To create an informed prior for the dispersion parameter in the negative binomial model, we use the dispersion estimates returned from the `dispersion_evaluation` function used in the container object for model 1 (@lst-usage-m1). We want to estimate the association between the log mean counts per target and the log-dispersion estimate, and fit a model to these data using a local polynomial regression (`loess`). The model's predictions are used to specify the dispersion parameter prior, with the residual variation parameter defining the standard deviation of the prior. Next, we also want to summarise the parameter-specific estimates common to all targets from the first model and use them as priors in the subsequent informed model. In `glmmTMB` (version 1.1.14), priors are specified as data frames with columns `prior`, `class` and `coef`, with the prior defined using a character specifying the distribution and parameter values (e.g., `"normal(0,1)"`). We thus need to add the distributional form to each entry in the prior data frame, along with the class (either fixed, `"fixef"`, or random, `"ranef"`) and the term defining the `coef`. Finally, since we will use the predicted association between dispersion and raw counts as the prior for the dispersion parameter, we will store each resulting data frame in a list of equal length to the number of targets. This workflow is supported by the `seqwrap_priors` function, which uses the estimates from the first model run and the raw data to create a target-specific list of priors (@lst-usage-m4). After setting up the priors list, we need to define a second seqwrap container for the model, corresponding to the model described in @eq-model-4, with priors built from the non-informed estimates. Using `seqwrap_compose` and the `targetdata` argument, the list containing the target-specific priors is defined. This makes the columns of the data frames in each list slot available in each iteration. We can then reference these columns in the data frame created by the priors argument (@lst-usage-m4).]{custom-style="edits"}
 
 ```{r}
-#| lst-label: lst-usage-m3
-#| lst-cap: "Setting up priors for the negative binomial model (Model 3)"
+#| lst-label: lst-usage-m4
+#| lst-cap: "Setting up priors for the informed negative binomial model (Model 4)"
 #| eval: false
 
-# Combine dispersion estimates and raw mean counts
-dispersion_dat <- data.frame(
-  target = as.character(counts[, 1]),
-  log_mu_raw = log(rowMeans(counts[, -1]))) |>
-  inner_join(m1_summaries$evaluations)
+# Use a preliminary run to create priors
+Priors_list <- seqwrap_priors(m1_results, data = counts)
 
-# Fit a trend model
-trend_model <- loess(dispersion ~ log_mu_raw, data = dispersion_dat)
-
-# Predict dispersion for each gene based on log raw counts
-# and combine into a prior.
-dispersion_prior <- data.frame(
-  gene = counts[, 1],
-  pred = round(
-    predict(
-      trend_model,
-      newdata = data.frame(
-        log_mu_raw = log(rowMeans(counts[, -1])))), 3), 
-  s = round(trend_model$s, 3)) |>
-  mutate(prior = paste0("normal(", pred, ",", s, ")"))
-
-# Summarise fixed-effects parameter values
-estimate_distributions <- m1_summaries$summaries |>
-    dplyr::select(target, term, estimate) |>
-    dplyr::summarise(.by = term,
-              m = mean(estimate),
-              s = sd(estimate)) |>
-    filter(!term %in%  c("(Intercept)", "sd__(Intercept)"))
-
-# Extract the random effects distribution to fit a gamma distribution
-random_sd_estimate <- m1_summaries$summaries |>
-    dplyr::filter(term == "sd__(Intercept)") |>
-    dplyr::select(target, term, estimate) |>
-    pull(estimate)
-
-mean_sd <- mean(random_sd_estimate)
-
-# Combine fixed- and random effects into a common data frame
-Priors_df <- bind_rows(
-    data.frame(prior = paste0("normal(0, ",
-                              round(estimate_distributions$s, 2), ")"),
-               class = rep("fixef", 5),
-               coef = estimate_distributions$term),
-    data.frame(prior = paste0(
-      "gamma(",
-      round(mean_sd ,2),
-      ",",
-      2,
-      ")"),
-      class = "ranef",
-      coef = "id")
-  )
-
-# Target specific priors in a list
-Priors_list <- list()
-for( j in 1:nrow( counts)) {
-    df <- bind_rows(Priors_df,
-                    data.frame(
-                      prior =
-                        dispersion_prior[dispersion_prior$gene ==
-                                           counts[j,1],4],
-                      class = "fixef_disp",
-                      coef = "1"
-                    )
-    )
-    Priors_list[[j]] <- df
-}
 
 # Defining a new seqwrap container
-m3 <- seqwrap_compose(
+m4 <- seqwrap_compose(
       data =  counts,
       metadata =  metadata,
       samplename = "seq_sample_id",
       modelfun = glmmTMB::glmmTMB,
-      eval_fun = custom_eval,
+      eval_fun = dispersion_evaluation,
       targetdata =  Priors_list,
       arguments = alist(
             formula =  y ~ time * group + offset(ln_efflibsize) + (1|id),
@@ -441,6 +407,36 @@ m3 <- seqwrap_compose(
 ```
 
 
+[When using the same prior for all targets, the target data can be a single data frame, or a list created with `seqwrap_priors` without the dispersion trend estimation. For model 5, the informed Poisson model, we will use `seqwrap_priors` with `dispersion = NULL` (@lst-usage-m5).]{custom-style="edits"}
+
+```{r}
+#| lst-label: lst-usage-m5
+#| lst-cap: "Defining Model 5 as a seqwrap container object"
+#| eval: false
+
+# Use a preliminary run to create priors
+Priors_list <- seqwrap_priors(m2_results, data = counts, 
+                              dispersion = NULL)
+
+
+m5 <- seqwrap_compose(
+      modelfun = glmmTMB::glmmTMB,
+      data = counts, 
+      metadata = metadata, 
+      targetdata = Priors_list,
+      arguments = alist(
+            formula = y ~ time * group + offset(ln_efflibsize) + (1|id) + 
+                  (1|seq_sample_id),
+            family = stats::poisson,
+            priors = data.frame(
+                  prior = prior,
+                  class = class,
+                  coef = coef)
+      ),
+      samplename = "seq_sample_id" 
+  )
+
+```
 
 
 ### Analysis of DNA methylation array data
@@ -482,7 +478,7 @@ weight <- filter(sample_metadata, name == "weight") |> pull(stat)
 
 ```
 
-[Seaborne et al. [@seaborne2018;@seaborne2018b] investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this purpose, eight previously untrained male participants (mean (SD): age, `r age`; weight, `r weight`; height, `r height`) completed a sequential protocol with two seven-week periods of resistance-exercise training (RET) separated by a seven-week unloading period without RET. RET periods included two weekly sessions targeting the lower limbs and one weekly session targeting the upper body (seven and five exercises, respectively; four sets of ten repetitions per exercise). Skeletal muscle biopsies were sampled from *m. vastus lateralis* on five occasions: before the intervention, 30 min after the first exercise session, and after the completion of each of the seven-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Blood and Tissue Kit, Qiagen, Manchester, UK) and bisulfite-converted before amplification, fragmentation, and hybridization using the Illumina Infinium MethylationEPIC BeadChip protocol [@seaborne2018;@seaborne2018b].]{custom-style="edits"}
+[Seaborne et al. @seaborne2018 investigated whether human skeletal muscle retains an epigenetic memory of earlier hypertrophy-inducing resistance training. For this purpose, eight previously untrained male participants (mean (SD): age, `r age`; weight, `r weight`; height, `r height`) completed a sequential protocol with two seven-week periods of resistance-exercise training (RET) separated by a seven-week unloading period without RET. RET periods included two weekly sessions targeting the lower limbs and one weekly session targeting the upper body (seven and five exercises, respectively; four sets of ten repetitions per exercise). Skeletal muscle biopsies were sampled from *m. vastus lateralis* on five occasions: before the intervention, 30 min after the first exercise session, and after the completion of each of the seven-week periods. Genomic DNA was extracted from muscle biopsy samples (DNeasy Blood and Tissue Kit, Qiagen, Manchester, UK) and bisulfite-converted before amplification, fragmentation, and hybridization using the Illumina Infinium MethylationEPIC BeadChip protocol [@seaborne2018;@seaborne2018b].]{custom-style="edits"}
 
 
 ```{r}
@@ -500,9 +496,9 @@ probes <- dim(gset)[1]
 ```
 
 
-[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@aryee2014]. Files were read and normalized using between-array quantile normalization (`preprocessQuantile()`), stratified by probe region and applied with outlier correction, before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
+[We downloaded a total of 40 samples from the Gene Expression Omnibus (GSE114763). We retained 38 samples for subsequent analysis after removal of two samples identified by Seaborne et al. as unreliable in preliminary quality control analysis [@seaborne2018b]. Raw array files were further processed using the minfi package [@aryee2014]. Files were read and normalized using between-array quantile normalization (`preprocessQuantile()`), stratified by probe region, with outlier correction, before filtering. Probes were filtered from the data set if they (1) failed detection in any retained sample, (2) overlapped common SNPs at the target CpG or single-base extension site, (3) appeared on published lists of cross-reactive EPIC probes [@pidsley2016;@mccartney2016] (using the maxprobes package), or (4) mapped to the sex chromosomes (all-male cohort). After filtering, `r probes` probes remained for analysis.]{custom-style="edits"}
 
-[Between-array quantile normalization returns methylation as a log ratio rather than as a pair of intensities. For each sample and CpG site the M-value was therefore taken directly as $M =\log_2(\text{Meth}/\text{Unmeth})$, and the methylation ratio, also called the &beta; value, was derived from it by the inverse logit, $\beta = 2^{M}/(1 + 2^{M})$. No offset constant was used. As the &beta; values are restricted to the interval (0,1) the variance is dependent on the mean and will shrink when approaching the boundary. Although the &beta; values has a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assumes constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the logit transform of &beta; values is commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010]. This metric, also called the M-value, is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied as compared to the same model being used with &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a].]{custom-style="edits"}
+[Between-array quantile normalization returns methylation as a log ratio rather than as a pair of intensities. For each sample and CpG site, the M-value was therefore taken directly as $M =\log_2(\text{Meth}/\text{Unmeth})$, and the methylation ratio, also called the &beta; value, was derived from it by the inverse logit, $\beta = 2^{M}/(1 + 2^{M})$. No offset constant was used. As the &beta; values are restricted to the interval (0,1), the variance depends on the mean and will shrink as the mean approaches the boundary. Although the &beta; values have a convenient interpretation as the approximate methylation percentage for a specific CpG, statistical models that assume constant variance fail to account for the floor and ceiling effects induced by the boundaries [@du2010]. To mitigate this problem, the M values are commonly used for statistical analysis of per-site differential methylation [@du2010;@laird2010] as this metric is free of boundary effects and has been shown to have favorable statistical properties when a statistical model assuming homoscedasticity is applied, compared with the same model using &beta; values as the response variable [@du2010]. However, the &beta; values could more appropriately be modeled using beta regression, e.g., as implemented in the glmmTMB package [@brooks2017a].]{custom-style="edits"}
 
 [In small samples modeled with Gaussian mixed-effects models, restricted maximum likelihood (REML) estimation and subsequent derivation of p-values from a corrected reference distribution, using, e.g., Satterthwaite's method to approximate the denominator degrees of freedom (DDF), will lead to acceptable type I error rates [@luke2017]. Conversely, failing to account for small sample bias will inflate the type I error rate and invalidate inference. For generalized linear mixed models, REML estimation has not been standard practice due to difficulties extending the method to non-normal outcomes [@maestrini2026]. However, several extensions have been proposed and shown to reduce small-sample bias when estimating variance components in generalized linear mixed models [@maestrini2026]. Similar to REML estimation, Satterthwaite's method for approximating DDF, which was not previously implemented in software for modeling non-normal outcome variables, is now available in the glmmTMB package. We therefore chose to evaluate the characteristics of these modeling choices using a permutation experiment to assess the type I error rate and power in the small-sample-size but large-target-size methylation data set. We also used the full data set [@seaborne2018] to show that seqwrap can handle a large number of targets (`r probes` CpG sites).]{custom-style="edits"}
 
@@ -519,7 +515,7 @@ b_{c,j} &\sim \operatorname{Normal}(0, \sigma_{c[\text{participant}]}) \\
 \end{align}
 $$ {#eq-model-m}
 
-[In @eq-model-m, $\mathbf{X}_{i} \boldsymbol{\beta}_c$ expands to an intercept ($\beta_{0c}$) representing the site-specific mean in the reference sampling time-point, and parameters for indicator variables representing follow-up sampling time points ($\beta_{1c}$, 30 min after the first session; $\beta_{2c}$, after the first 7-week loading period; $\beta_{3c}$, after the unloading period, and; $\beta_{4c}$, after the reloading period). A participant- and site-specific intercept ($b_{c,j}$) accounted for the correlation between samples within participants and enabled parameters to be interpreted as within-participant comparisons between the reference and follow-up sampling time-points.]{custom-style="edits"} 
+[In @eq-model-m, $\mathbf{X}_{i} \boldsymbol{\beta}_c$ expands to an intercept ($\beta_{0c}$) representing the site-specific mean in the reference sampling time-point, and parameters for indicator variables representing follow-up sampling time points ($\beta_{1c}$, 30 min after the first session; $\beta_{2c}$, after the first 7-week loading period; $\beta_{3c}$, after the unloading period; and $\beta_{4c}$, after the reloading period). A participant- and site-specific intercept ($b_{c,j}$) accounted for the correlation between samples within participants and enabled parameters to be interpreted as within-participant comparisons between the reference and follow-up sampling time points.]{custom-style="edits"} 
 
 [The second model uses the beta regression model proposed by @ferrari2004 as implemented in glmmTMB [@brooks2017a] (@eq-model-beta) that uses a logit link to connect the linear predictor to the conditional mean ($\mu_{ci}$, $0 < \mu < 1$) and the precision parameter ($\phi_{c}$, $\phi > 0$) that determines the variance as $\operatorname{Var}(y) = \frac{\mu(1-\mu)}{1+\phi}$ [@ferrari2004].]{custom-style="edits"} 
 
@@ -532,7 +528,7 @@ b_{c,j} &\sim \operatorname{Normal}(0, \sigma_{c[\text{participant}]}) \\
 \end{align}
 $$ {#eq-model-beta}
 
-[As described above for the RNA-seq models, to fit the two models using the seqwrap package, we first organize the methylation data matrix so that each row represents a specific CpG site. The first column of the data frame contains CpG site names, and the following columns represent samples (`mdata` and `betadata`, respectively, @lst-usage-m67). The `metadata` is organized to include the factor variables needed to fit the model (participant and time-point identifiers) and a variable containing the sample name corresponding to the column names of the `data` data frame. REML is not the default estimator in glmmTMB, so we need to explicitly set `REML = TRUE` for fits estimated with REML. As we are interested in evaluating the use of the Satterthwaite correction for deriving p-values, we also define a custom summary function for these models (@lst-usage-m67). Using the generic summary for glmmTMB objects with `ddf = "satterthwaite"` we retrieve the p-values and approximated degrees of freedom. We combine the output so that both p-values are returned.]{custom-style="edits"} 
+[As described above for the RNA-seq models, to fit the two models using the seqwrap package, we first organize the methylation data matrix so that each row represents a specific CpG site. The first column of the data frame contains CpG site names, and the following columns represent samples (`mdata` and `betadata`, respectively, @lst-usage-m67). The `metadata` is organized to include the factor variables needed to fit the model (participant and time-point identifiers) and a variable containing the sample name corresponding to the column names of the `data` data frame. REML is not the default estimator in glmmTMB, so we need to explicitly set `REML = TRUE` for fits estimated with REML. As we are interested in evaluating the use of the Satterthwaite correction for deriving p-values, we also define a custom summary function for these models (@lst-usage-m67). Using the generic summary for glmmTMB objects with `ddf = "satterthwaite"` we retrieve the approximated degrees of freedom and the p-values from the two procedures (Wald Z and Satterthwaite *t*) which we combine in the output.]{custom-style="edits"} 
 
 ```{r}
 #| lst-label: lst-usage-m67
@@ -543,29 +539,22 @@ $$ {#eq-model-beta}
 
 # A custom summary function
 custom_summary <- function(m) {
-      # The same statistic read against two reference distributions.
-      #  z reference
-      wald <- coef(summary(m))$cond
-      # t reference, Satterthwaite ddf
-      # The Satterthwaite computation needs a second differentiation of the
-      # likelihood and can fail on a degenerate fit where the plain Wald
-      # table is still returned, so a site loses p_satt only rather than
-      # dropping out entirely.
-      satt <- tryCatch(coef(summary(m, ddf = "satterthwaite"))$cond,
-                       error = function(e) NULL)
-      i <- if (is.null(satt)) NA_integer_ else match(rownames(wald),
-                                                    rownames(satt))
+  # The same fit read against two reference distributions:
+  # z (Wald) and t with Satterthwaite-approximated ddf. Both tables
+  # share terms, estimates and standard errors.
+  wald <- coef(summary(m))$cond
+  satt <- coef(summary(m, ddf = "satterthwaite"))$cond
 
-    data.frame(
-      term      = rownames(wald),
-      estimate  = wald[, "Estimate"],
-      std.error = wald[, "Std. Error"],
-      p_wald    = wald[, "Pr(>|z|)"],
-      ddf       = if (is.null(satt)) NA_real_ else satt[i, "ddf"],
-      p_satt    = if (is.null(satt)) NA_real_ else satt[i, "Pr(>|t|)"],
-      row.names = NULL
-    )
-  }
+  data.frame(
+    term      = rownames(wald),
+    estimate  = wald[, "Estimate"],
+    std.error = wald[, "Std. Error"],
+    p_wald    = wald[, "Pr(>|z|)"],
+    ddf       = satt[, "ddf"],
+    p_satt    = satt[, "Pr(>|t|)"],
+    row.names = NULL
+  )
+}
 
 
 # Preparing the swcontainer objects for REML M and beta models
@@ -596,11 +585,11 @@ beta_model <- seqwrap_compose(
 
 ```
 
-[Note that the when the family argument is empty in glmmTMB, the Gaussian (normal) distribution is assumed.]{custom-style="edits"} 
+[Note that when the family argument is empty in glmmTMB, the Gaussian (normal) distribution is assumed.]{custom-style="edits"} 
 
-[To evaluate the characteristics of the two models we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 200 iterations, systematic time-effects were removed by resampling the time variable within participants creating plasmode [@gadbury2008] data sets with a permuted time variable. This retained the within-participant correlation between samples while removing the association between time and methylation status. The permutation was used to create a null-distribution enabling the estimation of the type 1 error rate of each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set on a specific time-point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). Our approach deviates from the workflow for the creation plasmode data sets suggested by @gadbury2008 but enables systematic evaluation of model characteristics at tracable magnitudes and direction of effects between data sets (M and &beta; values, respectively). After each iteration, type I error rates where estimated as the proportion of p-values < 0.05 among true null sites. Power was estimated among sites with added effects as the percentage of sites with p-values below the empirical critical value.]{custom-style="edits"} 
+[To evaluate the characteristics of the two models, we performed a permutation experiment on a subset (n = 1000) of CpG sites representing different strata of average &beta; values. Over 200 iterations, systematic time effects were removed by resampling the time variable within participants, creating plasmode [@gadbury2008] data sets with a permuted time variable. This retained the within-participant correlation between samples while removing the association between time and methylation status. The permutation was used to create a null distribution, enabling estimation of the type I error rate for each model. In 20% of the subset, balanced per strata, effects were added to the permuted data set at a specific time point to enable estimation of the statistical power of model. Effects were added on the M value scale (0.1, 0.2, 0.4 and 0.8 balanced between positive and negative signs) from which data were transformed to the &beta; scale ($\beta = \frac{2^M}{1+2^M}$, since $M = \operatorname{log}_2(\frac{\beta}{1-\beta})$ [@du2010;@laird2010;@fortin2014]). Our approach deviates from the workflow for the creation of plasmode data sets suggested by @gadbury2008. Still, it enables systematic evaluation of model characteristics at traceable magnitudes and direction of effects between data sets (M and &beta; values, respectively). After each iteration, type I error rates were estimated as the proportion of p-values < 0.05 among true null sites. Power was estimated across sites with added effects as the percentage of sites with p-values below the empirical critical value (5^th^ percentile of the null p-value distribution).]{custom-style="edits"} 
 
-[Following the permutation experiment, we fitted the models using the full data sets of &beta;, and M-values and estimated the site-specific effect as contrasts between the baseline and follow-up time-points.]{custom-style="edits"}
+[Following the permutation experiment, we fitted the models using the full data sets of &beta; and M values and estimated the site-specific effect as contrasts between the baseline and follow-up time-points.]{custom-style="edits"}
 
 ## Results
 
@@ -1032,7 +1021,7 @@ read_full_arm <- function(file) {
   )
 
   rm(arm, summaries)
-  gc()
+  gc(verbose = FALSE)
 
   out
 }
@@ -1087,7 +1076,7 @@ gset <- readRDS(
   here::here("analysis/data/derived_data/seaborne-gset-quantile.RDS")
 )
 
-n_fits <- dim(gset)
+n_fits <- dim(gset)[1]
 
 # Number of issues 
 n_fit_issues <- full_errors |> 
@@ -1105,7 +1094,7 @@ n_fit_issues <- full_errors |>
 
 [Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by Satterthwaite's method for approximating the denominator degrees of freedom, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 B). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 B). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 C).]{custom-style="edits"}     
 
-[Following the permutation experiment, we used the most appropriate models (REML estimator) to model the full data sets. Both model types ($beta; and M value models) were fitted with a low rate of convergence issues; out of a total of `r n_fits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues, for the &beta; and M value models, respectively. Among successful fits, the estimated effect sizes (M-value units) indicated that overall effects in the data set were small (@fig-figure5 E). Indeed, after p-value adjustment (False discovery rate < 0.05), no sites could be declared as differentially methylated.]{custom-style="edits"}
+[Following the permutation experiment, we used the most appropriate models (REML estimator) to model the full data sets. Both model types (&beta; and M value models) were fitted with a low rate of convergence issues; out of a total of `r n_fits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues, for the &beta; and M value models, respectively. Among successful fits, the estimated effect sizes (M-value units) indicated that overall effects in the data set were small (@fig-figure5 E). Indeed, after p-value adjustment (False discovery rate < 0.05), no sites could be declared as differentially methylated.]{custom-style="edits"}
 
 [Finally, we assessed the time cost of running seqwrap across different model specifications. We found that, for a given model specification, after a fixed start-up cost associated with initiating parallelization, elapsed time scaled linearly with the number of targets in the data set (@fig-figure5 F). Using smaller subsets of the full data sets (number of targets $\le$ 4000), we could predict the final computational cost for the full data sets (m = `r n_fits` targets) within 5% (@fig-figure5 G), indicating that linearity scales up to `r n_fits` fits for this data set (38 samples). The different model specifications used to derive @fig-figure5 F and G varied in complexity and scope, with the most costly fits incorporating the Satterthwaite correction, which adds an additional computation per fit.]{custom-style="edits"} 
 
@@ -1116,7 +1105,7 @@ n_fit_issues <- full_errors |>
 #| echo: false
 #| message: false
 #| warning: false
-#| fig-cap: "(A) Distribution of &beta; values in the DNA methylation data set and categories used for creating the plasmode data set. Methylation sites were sampled with equal probability from each catogory. (B) Error rates across &beta; categories for the two candidate models (Gaussian on M-values and beta regression using &beta; values), using either restricted maximum likelihood (REML) or maximum likelihood (ML) p-values derived using Wald p-values or the Satterthwaite-corrected p-values, averaged over model terms. Error bars represents 95% confidence intervals created from between iteration standard errors. (C) Median standard errors estimated from each category for each model and estimator. (D) Size adjusted power for each model determined using REML and p-values derived after Satterthwaite's correction. (E) Distribution of effect sizes in the full data set for each contrast. (F) Timing of seqwrap runs using subsets of the complete data set. Each subset was run three times and a linear model was fitted (lines) indicating linear scaling of computation time to data set size. Computational time required for running the full data set was predicted within ~ 5% indicating (G). "
+#| fig-cap: "(A) Distribution of &beta; values in the DNA methylation data set and categories used for creating the plasmode data set. Methylation sites were sampled with equal probability from each category. (B) Error rates across &beta; categories for the two candidate models (Gaussian on M-values and beta regression using &beta; values), using either restricted maximum likelihood (REML) or maximum likelihood (ML) p-values derived using Wald p-values or the Satterthwaite-corrected p-values, averaged over model terms. Error bars represent 95% confidence intervals created from between-iteration standard errors. (C) Median standard errors estimated from each category for each model and estimator. (D) Size adjusted power for each model determined using REML and p-values derived after Satterthwaite's correction. (E) Distribution of effect sizes in the full data set for each contrast. (F) Timing of seqwrap runs using subsets of the complete data set. Each subset was run three times and a linear model was fitted (lines) indicating linear scaling of computation time to data set size. Computational time required for running the full data set was predicted within ~ 5% indicating (G). "
 #| fig-width: 6.69
 #| fig-height: 7.87
 #| out-width: "170mm"
@@ -1140,18 +1129,21 @@ if (show_figures) {
 
 ## Discussion
 
-In this paper, we propose a workflow enabled by the `seqwrap` R package that generalizes to a broad class of omics analyses in which genes, proteins, exons, etc., are analyzed on a per-target basis using regression models. `seqwrap` allows for the use of established R-based regression modelling packages and user-defined post-fitting summaries of the models. Importantly, this enables the analysis of high-dimensional data from complex designs that require hierarchical models, e.g., by specifying random effects, while allowing different distributional models (negative binomial, Poisson, Normal, etc.), thereby adding flexibility for analyzing diverse high-dimensional data within a single framework. By taking advantage of recent developments in the `glmmTMB` package [@brooks_glmmtmb_nodate; @brooks2017a] and iterative modelling using `seqwrap` we also introduced an empirical Bayes strategy for analyzing data from a repeated measure experiment [@pillon2022] using data from non-informed models as the basis for priors in regularized models. This effectively fills a gap in analyses of high-dimensional data from complex study designs where sharing of information between targets through shrinkage has been lacking or limited in packages enabling incorporation of random effects [@vestal_lmerseq_2022; @hoffman_dream_2021; @nguyen_rmrnaseq_2020; @lewis_glmmseq_2022; @bian_pairedfb_2019; @vestal_mcmseq_2020], while at the same time, canonical packages incorporating shrinkage mechanisms lack support for flexible hierarchical/multilevel modelling [@love_moderated_2014; @robinson_edger_2010; @ritchie_limma_2015]. [Furthermore, we show that using restricted maximum likelihood in small-sample studies improves the validity of inference through unbiased estimation of parameter standard errors errors. Finally, using the Satterthwaite's method for approximating the degress of freedom...] {custom-style="edits"} 
+In this paper, we propose a workflow enabled by the `seqwrap` R package that generalizes to a broad class of omics analyses in which genes, proteins, exons, etc., are analyzed on a per-target basis using regression models. `seqwrap` allows for the use of established R-based regression modelling packages and user-defined post-fitting summaries of the models. Importantly, this enables the analysis of high-dimensional data from complex designs that require hierarchical models, e.g., by specifying random effects, while allowing different distributional models (negative binomial, Poisson, Normal, etc.), thereby adding flexibility for analyzing diverse high-dimensional data within a single framework. By taking advantage of recent developments in the `glmmTMB` package [@brooks_glmmtmb_nodate; @brooks2017a] and iterative modelling using `seqwrap` we also introduced an empirical Bayes strategy for analyzing data from a repeated measure experiment [@pillon2022] using data from non-informed models as the basis for priors in regularized models. This effectively fills a gap in analyses of high-dimensional data from complex study designs where sharing of information between targets through shrinkage has been lacking or limited in packages enabling incorporation of random effects [@vestal_lmerseq_2022; @hoffman_dream_2021; @nguyen_rmrnaseq_2020; @lewis_glmmseq_2022; @bian_pairedfb_2019; @vestal_mcmseq_2020], while at the same time, canonical packages incorporating shrinkage mechanisms lack support for flexible hierarchical/multilevel modelling [@love_moderated_2014; @robinson_edger_2010; @ritchie_limma_2015]. [Furthermore, leveraging developments in the established glmmTMB package, we show that using restricted maximum likelihood estimation in small-sample studies improves inference by better-calibrated standrad errors and p-values, also in the context of generalized linear mixed models. Finally, using Satterthwaite's method to approximate degrees of freedom for the reference t-distribution, we show that this step yields better-calibrated p-values for subsequent inference.]{custom-style="edits"} 
 
-[Although we demonstrate `seqwrap` using transcriptomic data, its design is not tied to any specific biological data type. It requires only a target-by-sample matrix (or a list of such matrices), corresponding sample metadata, and user-specified model-fitting function (e.g., `lme4`, `nlme`, `glmmTMB`, `mgcv`) and argument. Consequently `seqwrap` places no restrictions on the nature of the target being analysed. The target may be a transcript, splicing event, protein, metabolite, methylation site etc. provided the data is arranged to fit the input specifications. This generality also extends to the choice of statistical models. Count-based measurements, such as transcriptomic data can be analyzed using Poisson or negative binomial distributions. Proportion-based outcomes, including splicing efficiency data, can be modeled using beta or zero-inflated beta distributions. Continuous measurements that are approximately Gaussian, such as many proteomic or metabolomic data, can be analyzed using models with normally distributed errors. Likewise, data characterized by excess zeros, such as peptide-level measurements affected by detection limits, can be analysed using zero-inflated distributions. Compositional outcomes, including microbiome relative abundance data, may similarly be modeled using beta, zero-inflated beta, or other distributions appropriate for compositional constraints. The modelling algorithms supported by `seqwrap` position the package as a general-purpose framework for applying modern regression modelling approaches to a wide range of high-dimensional biological datasets.]{custom-style="edits"} [It should, however, be recognized that seqwrap, by design, primarily addresses parallel estimation problems, such as differential expression of biological targets (e.g., mRNA or proteins), and not joint modeling problems in which high-dimensional predictors, such as genomic features, are selected for a sparse subset through variable selection [@fan2025;@fan2026]. Instead of building a single model, seqwrap iteratively fits multiple models, and, as suggested in our workflow, regularization can be achieved through an empirical Bayes approach by using the distributions of preliminary estimates as priors in a second series of model fits. This results in fully independent (preliminary models) and regularized (empirical Bayes) per-target estimates.]{custom-style="edits"}
-
-
-Leveraging the flexibility of our proposed workflow in our case study, using simulations based on the observed data, we found that regularized models outperformed non-informed models and a model of transformed counts analyzed using a Gaussian random-effects model [@vestal_lmerseq_2022] for sensitivity in detecting truly differentially expressed genes, while also more accurately capturing their population-level rankings. Furthermore, regularizing count-based models reduced the number of false discoveries and improved model convergence rates. Regularization via empirical Bayes likely improved model performance in our simulations by stabilizing extreme parameter estimates toward the overall distribution. This strategy more efficiently uses available information as it "borrows information" from all targets when estimating parameters for a single target [@efron2010]. Empirical priors also restrict the model optimization to more plausible values, thereby avoiding numerical issues ([@brooks2017a]; see the package documentation for a discussion on regularization). As this serves two purposes, improving inference [@efron2010] and model convergence rates, it may be preferred to post-fitting shrinkage of model estimates [@stephens2016]. However, using the empirical Bayes shrinkage approach carries the risk of missing truly extreme cases, such as a small number of truly differentially expressed genes. In our real-world data at the baseline measurement, a single long non-coding RNA, TMEM9B-AS1, was identified as differentially expressed in the non-informed models. Although we have strong reasons to believe that this target is differentially regulated between individuals with diabetes and healthy controls, as it has been confirmed in independent cohorts and shown to induce disease-specific characteristics in cell models [@sen2025], regularized models failed to identify it as different in our data. The cost of regularization, however, is likely lower than the benefits of, on average, more accurate inference.
+Leveraging the flexibility of our proposed workflow in our case study [covering RNA-seq analysis]{custom-style="edits"}, using simulations based on the observed data, we found that regularized models outperformed non-informed models and a model of transformed counts analyzed using a Gaussian random-effects model [@vestal_lmerseq_2022] for sensitivity in detecting truly differentially expressed genes, while also more accurately capturing their population-level rankings. Furthermore, regularizing count-based models reduced the number of false discoveries and improved model convergence rates. Regularization via empirical Bayes likely improved model performance in our simulations by stabilizing extreme parameter estimates toward the overall distribution. This strategy more efficiently uses available information as it "borrows information" from all targets when estimating parameters for a single target [@efron2010]. Empirical priors also restrict the model optimization to more plausible values, thereby avoiding numerical issues ([@brooks2017a]; see the package documentation for a discussion on regularization). As this serves two purposes, improving inference [@efron2010] and model convergence rates, it may be preferred to post-fitting shrinkage of model estimates [@stephens2016]. However, using the empirical Bayes shrinkage approach carries the risk of missing truly extreme cases, such as a small number of truly differentially expressed genes. In our real-world data at the baseline measurement, a single long non-coding RNA, TMEM9B-AS1, was identified as differentially expressed in the non-informed models. Although we have strong reasons to believe that this target is differentially regulated between individuals with diabetes and healthy controls, as it has been confirmed in independent cohorts and shown to induce disease-specific characteristics in cell models [@sen2025], regularized models failed to identify it as different in our data. The cost of regularization, however, is likely lower than the benefits of, on average, more accurate inference.
 
 The benefits of empirical Bayes shrinkage have long been recognized for reliable inference in gene expression studies, especially when sample sizes are small [@smyth2004; @ritchie_limma_2015; @love_moderated_2014; @robinson_edger_2010]. However, the implementations differ between popular packages. Notably, for RNA-seq analyses, the `limma` package uses a weighted linear model for transformed counts with shrinkage applied to the t-statistics (moderated t-statistics) [@smyth2004; @ritchie_limma_2015]. Similarly to `limma`, although directly modelling counts using a negative binomial model, the `edgeR` and `DESeq2` packages include functionality to shrink gene-wise dispersion estimates towards a global trend [@chen2025; @love_moderated_2014]. Additionally, `DESeq2` also shrinks effect sizes towards zero [@love_moderated_2014]. These differences may indicate that modelling strategies have been optimized to slightly different use cases, such as relatively small samples. Indeed, both `edgeR` and `DESeq2` have been shown to have higher rates of false discoveries as sample sizes increase (\> 100), potentially due to violations of model assumptions [@li2022]. Interestingly, in our case study, we consistently observed that regularized count-based models had lower false discovery rates than their non-informed counterparts using the target sample size (108 samples, 36 participants). However, we also observed a trend towards more false discoveries, especially in the large-sample, high-variability dispersion scenario across all models for the interaction effect. Although speculative, since this trend was also observed in the model of transformed counts, we suspect that unmodelled heterogeneous variation may influence the false discovery rate. This variation could also reside in the Gaussian model as an artifact of the VST transformation. A potential remedy for the increased false-positive rates could be to explicitly model heterogeneous variation across time points or groups. Collectively, this highlights the need to validate modelling choices and assumptions for specific datasets. Arguably, a flexible modeling approach will provide more opportunities for valid inference.
 
 To highlight one such opportunity, we include a Poisson OLRE model in our comparison using our 'seqwrap' package. The Poisson OLRE model has previously been used to model RNA-seq data [@sun2017; @cui2016], with favorable performance [@sun2017], where the observation-level random effect captures extra-Poisson variation in the data [@harrison2014]. In the simulation study, the negative binomial model performed slightly better than the Poisson OLRE model. However, this may be because we used a negative binomial model to simulate the data, biasing the comparison in its favor. In the actual data, albeit without ground truth, the Poisson OLRE identified more differentially expressed genes. The two regularized models also had considerable non-overlap in detected differentially expressed genes. This could partially be explained by how the models capture variation in the data, which could capture different expression patterns, although this needs further scrutiny. Importantly, in the real-world data, the regularized Poisson OLRE model had lower AIC values in most cases (\>80%) than the regularized negative binomial model, indicating better out-of-sample predictive performance. In addition to our observations, simulations in other study designs[@sun2017] suggest that the Poisson OLRE model is a powerful alternative to the negative binomial model.
 
 Using estimates from the real-world data in downstream gene set enrichment analysis, we observed high overlap between the models. This agreement between models could be explained by a strong biological signal, together with results from our simulations, which indicate that, in the low-dispersion-variability scenario, correlations between true and estimated population effects were more stable across models. Our high-variability-dispersion scenario represented an extreme case of variation, which increased the utility of regularization. Importantly, gene set enrichment analysis is not performed in isolation but rather as a complement to differential expression analysis. Additionally, several proposed metrics for gene set analysis also include measures of uncertainty, such as the minimum significant difference [@zyla2017], highlighting the importance of powerful estimation.
+
+[In our second case study, we evaluated potential modeling decisions by analyzing methylation data obtained from an array-based platform [@seaborne2018]. Our permutation experiment showed that the choice of estimator (REML vs. ML) and the correction of the reference distribution used to derive p-values using Satterthwaite's method for approximating the degrees of freedom for the denominator were important for unbiased inference. However, the choice of outcome measure, &beta; values, restricted to the 0-1 interval, or M values being the logit transform of &beta; values did not affect inference as long as the appropriate distributional model was used (beta- and Gaussian regression, respectively). The novelty of our proposed R package is making REML estimation and Satterthwaite's method, as implemented in glmmTMB, available the context of generalized linear mixed models for per-target analysis of high-dimensional data, enabling unbiased estimation of the more intuitive &beta; values. Conversely, &beta; values modeled under the normal distribution will violate the assumptions of equal variance (homoscedasticity), which will bias inference [@du2010]. Although REML estimation is standard practice in linear mixed models, it has not been so in generalized linear mixed models with alternative distributional models and link functions [@maestrini2026]. However, results indicate that REML provides unbiased estimation of variance components in generalized linear mixed models [@maestrini2026], which, together with our more specific study, supports the general use of REML in omics analyses. Recently, the Satterthwaite method was experimentally introduced in the glmmTMB package for non-normal models as well. Here, we evaluated its use in beta regression, with favorable results supporting its potential as an addition to omics workflows for other outcomes and distributional assumptions. Importantly, our permutation experiment could be used to validate its use in the specific context of the study design and data characteristics. Together, the use of REML and Satterthwaite's method shows promise as a general route for omics-type analyses.]{custom-style="edits"}
+
+[Although we demonstrate `seqwrap` using transcriptomic and epigenomic data, its design is not tied to any specific biological data type. It requires only a target-by-sample matrix (or a list of such matrices), corresponding sample metadata, and user-specified model-fitting function (e.g., `lme4`, `nlme`, `glmmTMB`, `mgcv`) and arguments. Consequently, `seqwrap` places no restrictions on the nature of the target being analysed. The target may be a transcript, splicing event, protein, metabolite, methylation site etc. provided the data is arranged to fit the input specifications. This generality also extends to the choice of statistical models. Count-based measurements, such as transcriptomic data can be analyzed using Poisson or negative binomial distributions. Proportion-based outcomes, including e.g., splicing efficiency data, methylation status or compositional outcomes, such as microbiome relative abundance data, can be modeled using the beta distribution. Continuous measurements that are approximately Gaussian, such as many proteomic or metabolomic data, can be analyzed using models with normally distributed errors. Likewise, data characterized by excess zeros, such as peptide-level measurements affected by detection limits, can be analysed using zero-inflated distributions. The modelling algorithms supported by `seqwrap` position the package as a general-purpose framework for applying modern regression modelling approaches to a wide range of high-dimensional biological datasets. However, using modeling algorithms constructed for a single outcome and applying them to a high-dimensional data set for parallel estimation likely scales these algorithm to a problem for which they were not optimized leading to higher computational costs compared to tools optimized for high-dimensional data. Indeed, our case study analyzed >700,000 CpG sites and small differences between model specifications and evaluation methods resulted in large differences in elapsed time ]{custom-style="edits"} 
+
+[Consequently, `seqwrap` places no restrictions on the nature of the target being analyzed. The target may be a transcript, splicing event, protein, metabolite, methylation site, etc., provided the data is arranged to fit the input specifications. This generality also extends to the choice of statistical models. Count-based measurements, such as transcriptomic data, can be analyzed using Poisson or negative binomial distributions. Proportion-based outcomes, including, e.g., splicing efficiency data, methylation status, or compositional outcomes, such as microbiome relative abundance data, can be modeled using the beta distribution. Continuous measurements that are approximately Gaussian, such as many proteomic or metabolomic data, can be analyzed using models with normally distributed errors. Likewise, data characterized by excess zeros, such as peptide-level measurements affected by detection limits, can be analyzed using zero-inflated distributions. The modeling algorithms supported by `seqwrap` position the package as a general-purpose framework for applying modern regression modeling approaches to a wide range of high-dimensional biological datasets. However, using modeling algorithms designed for a single outcome and applying them to a high-dimensional data set for parallel estimation likely scales them to a problem for which they were not optimized, leading to higher computational costs than tools optimized for high-dimensional data. Indeed, our case study analyzed >700,000 CpG sites, and small differences between model specifications and evaluation methods resulted in large differences in elapsed time (~4 vs. 10 hours). We urge the user to carefully characterize their workflow before committing to a full analysis. This is true both in terms of computational cost and of subsequent inferential performance.]{custom-style="edits"}
 
 ## Conclusions
 
