@@ -699,10 +699,10 @@ fig5 <- power_sign |>
 # 05. Results from full run #################################################
 
 # The results directory is VERSIONED in the same way as the permutation
-# directory: full_v2/ holds the four-arm run (beta, beta_reml, m, m_reml)
-# with `p_wald` and `p_satt` per contrast, the latter on the REML arms only.
-# The earlier two-arm files in the derived_data root (beta-model-full.RDS,
-# m-model-full.RDS) carry a different summary schema and are superseded by it.
+# directory: full_v3/ holds the two REML arms (beta_reml, m_reml) fitted on the
+# quantile normalized arrays, with `p_wald` and `p_satt` per contrast. full_v2/
+# (four arms, functionally normalized) and the two-arm files in the
+# derived_data root are superseded and live in analysis/archive/.
 full_dir <- here::here("analysis/data/derived_data/full_v3")
 full_arms <- c("beta_reml", "m_reml")
 full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
@@ -712,7 +712,7 @@ full_files <- file.path(full_dir, sprintf("%s.RDS", full_arms))
 # reported below), so what is missing is reported instead.
 if (!all(file.exists(full_files)))
   stop(
-    "missing arm files in full_v2/: ",
+    "missing arm files in full_v3/: ",
     paste(basename(full_files[!file.exists(full_files)]), collapse = ", "),
     ". Run analysis/R/methylation-case-full.R first.",
     call. = FALSE
@@ -917,15 +917,6 @@ results1 <- bind_rows(
 
 # 06. Timing experiment #####################################################
 
-# The annotation file
-gset <- readRDS(
-  here::here("analysis/data/derived_data/seaborne-gset-normalized.RDS")
-)
-anno <- minfi::getAnnotation(gset)
-nsites <- nrow(anno)
-
-rm(gset)
-gc()
 
 # The timimg results
 timing_dir <- here::here("analysis/data/derived_data/timing_v1")

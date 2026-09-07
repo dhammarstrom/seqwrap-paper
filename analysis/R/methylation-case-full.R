@@ -12,12 +12,10 @@
 # beta_reml   beta_family, REML       Wald-z, Wald-Satterthwaite
 #
 # THE ML ARMS ARE NOT FITTED HERE. The permutation study is what compares the
-# estimators, and it found the REML arms to be the calibrated ones; refitting
+# estimators, and it found the REML arms to be the calibrated ones. Refitting
 # the ML arms over every position would spend 7.2 hours reproducing an
-# estimator this study has already rejected, and the shrinkage step
-# (analysis/R/methylation-shrinkage.R) reads the REML arms only. The comparison
-# lives in the permutation study, where it is answered at a hundredth of the
-# cost.
+# estimator this study has already rejected and results reported
+# reads the REML arms only.
 #
 # Two things differ from the permutation study by design:
 #
@@ -112,8 +110,8 @@ metadata <- readRDS(
 # Deriving M- and beta-values ##############################################
 #
 # M first, beta derived from it -- the reverse of what this script did under
-# functional normalization, and the reversal is required rather than
-# stylistic. preprocessQuantile() returns a GenomicRatioSet that stores
+# functional normalization (previuous version).
+# preprocessQuantile() returns a GenomicRatioSet that stores
 # M = log2(Meth / Unmeth) and no intensities at all, so the Illumina offset
 # that used to hold beta off 0 and 1, getBeta(gset, offset = 100), has nothing
 # left to act on: getBeta() derives beta from M by the inverse logit and

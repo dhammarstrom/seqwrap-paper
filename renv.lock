@@ -11957,7 +11957,7 @@
     },
     "seqwrap": {
       "Package": "seqwrap",
-      "Version": "0.8.0",
+      "Version": "0.8.1",
       "Source": "GitHub",
       "Type": "Package",
       "Title": "Item-by-Item Iterative Model Fitting",
@@ -11980,6 +11980,8 @@
         "pbapply",
         "parallel",
         "stats",
+        "graphics",
+        "grDevices",
         "broom.mixed"
       ],
       "Suggests": [
@@ -12004,7 +12006,7 @@
         "R.rsp"
       ],
       "Config/testthat/edition": "3",
-      "Collate": "'seqwrap-global.R' 'aaa-.R' 'data-helper.R' 'data.R' 'generic-summaries.R' 'seqwrap-chunk.R' 'seqwrap.R' 'seqwrap_mtf.R' 'simcounts.R' 'simcounts2.R'",
+      "Collate": "'seqwrap-global.R' 'aaa-.R' 'data-helper.R' 'data.R' 'generic-summaries.R' 'seqwrap-chunk.R' 'seqwrap-priors.R' 'seqwrap.R' 'seqwrap_mtf.R' 'simcounts.R' 'simcounts2.R'",
       "VignetteBuilder": "quarto, R.rsp",
       "Config/roxygen2/version": "8.0.0",
       "Author": "Daniel Hammarström [aut, cre, cph] (ORCID: <https://orcid.org/0000-0001-8360-2100>), Chidimma Echebiri [ctb] (ORCID: <https://orcid.org/0000-0003-3134-5186>)",
@@ -12013,8 +12015,8 @@
       "RemoteHost": "api.github.com",
       "RemoteUsername": "trainome",
       "RemoteRepo": "seqwrap",
-      "RemoteRef": "0de2b2bc44a487ece51996f385686fa6344700b3",
-      "RemoteSha": "0de2b2bc44a487ece51996f385686fa6344700b3"
+      "RemoteRef": "a977d204deb2f45af329b08511ff08e8f8236b71",
+      "RemoteSha": "a977d204deb2f45af329b08511ff08e8f8236b71"
     },
     "shiny": {
       "Package": "shiny",

@@ -60,6 +60,7 @@ data_sim/
 data_sim-*/
 /analysis/data/raw_data/
 /analysis/data/derived_data/
+/analysis/archive/
 
 # The same results directories, but at the repository root. They belong under
 # analysis/data/derived_data/ and are ignored there by the rule above; a script
@@ -76,7 +77,7 @@ data_sim-*/
 /temp-make-logs/
 
 # Keep manuscript output
-!analysis/paper/paper.pdf
+!analysis/tracked-archive/paper.pdf
 !analysis/paper/supplement.pdf
 
 analysis/figures/*.RDS

@@ -1,7 +1,7 @@
 # temp-make.R -- run the methylation pipeline end to end on another machine.
 #
 # TEMPORARY. This is a runner for one re-run, not a build system: it hard-codes
-# the four scripts that have to be re-executed after the normalization change
+# the three scripts that have to be re-executed after the normalization change
 # and does nothing else. Delete it once the results are in.
 #
 # WHY A RE-RUN. The pipeline moved from functional to quantile normalization.
@@ -21,12 +21,11 @@
 # exists, so re-running this script after an interruption continues where it
 # stopped rather than starting over. It is safe to kill and restart.
 #
-# Expect roughly 46 hours in total on 16 cores, dominated by two steps:
+# Expect roughly 45 hours in total on 16 cores, dominated by two steps:
 #
 #   dataprep     ~15 min   (plus ~722 MB of downloads if the IDATs are absent)
 #   permutation  ~25 h     (200 iterations at ~7.6 min each)
 #   full run     ~20 h     (two REML arms: ~10.6 h beta, ~9.0 h M)
-#   shrinkage    ~40 min
 #
 # The machine should be otherwise idle and should not sleep.
 
@@ -93,13 +92,11 @@ cat("timings quoted in this script were measured at 16 cores.\n")
 #
 # The permutation runs before the full run because it is what licenses the
 # tests the full run reports. They are independent, so the order can be
-# swapped if the full-run results are wanted sooner; the shrinkage step must
-# come last, since it reads the full run's arm files.
+# swapped if the full-run results are wanted sooner.
 steps <- c(
   "analysis/R/methylation-case-study-dataprep.R",
   "analysis/R/methylation-error-permutation.R",
-  "analysis/R/methylation-case-full.R",
-  "analysis/R/methylation-shrinkage.R"
+  "analysis/R/methylation-case-full.R"
 )
 
 stopifnot(all(file.exists(steps)))
@@ -149,20 +146,11 @@ cat("\nAll steps completed.\n")
 #
 # analysis/R/methylation-timing-experiment.R
 #   Measures compute cost, not data values, so the normalization change does
-#   not affect its conclusions. It also reads the FUNCTIONALLY normalized gset
-#   and full_v2/timing.RDS, neither of which a fresh machine will have, so it
-#   would fail here rather than merely being redundant.
+#   not affect its conclusions. It reads the FUNCTIONALLY normalized gset and
+#   full_v2/timing.RDS, which a fresh machine will not have; both are kept in
+#   derived_data on the machine that produced timing_v1/.
 #
-# analysis/R/methylation-normalization-check.R
-# analysis/R/methylation-published-anova.R
-#   Both read seaborne-gset-normalized.RDS, the functionally normalized gset,
-#   which this pipeline no longer produces. The normalization check compares
-#   funnorm against SWAN and its premise is now stale -- the comparison that
-#   matters is quantile against the other two. Left for a decision rather than
-#   silently repointed.
-#
-# analysis/figures/figure-5.R and analysis/paper/case-study-methylation.qmd
-#   Still read full_v2/ and permutation_v3/. Repoint them at full_v3/ and
-#   permutation_v4/ once this script has produced those, not before: they are
-#   the reporting layer and would break against results that do not exist yet.
-#   Note that both also read the ML arms, which full_v3 does not contain.
+# analysis/R/methylation-shrinkage.R
+#   Removed from the pipeline; the revised paper does not report the
+#   shrinkage step. The script and its results (shrinkage_v1/, shrinkage_v2/)
+#   are in analysis/archive/.

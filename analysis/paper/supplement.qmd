@@ -325,11 +325,11 @@ Errors can be inspected by accessing the errors slot. From the inspection below,
 
 ```{r}
 
-warnings <- m1.2_results@errors|> 
-  # filter the non-null elements
-  filter(map_lgl(warnings_fit, ~ !is.null(.x[[1]]))) |> 
+warnings <- m1.2_results@errors |>
+  # one row per condition: keep warnings raised at the fit stage
+  filter(stage == "fit", type == "warning") |>
   # save in object
-  pull(warnings_fit)
+  pull(message)
 
 warnings[1]
 

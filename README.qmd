@@ -61,11 +61,12 @@ The script `analysis/paper/make-docs.R` executes these steps and analysis script
 
 The **analysis** directory contains:
 
-  - `/analysis/paper`: Quarto source document for the manuscript (`paper.qmd`) and supplementary material (`supplement.qmd`). It also has a rendered versions, `paper.pdf` (and `supplement.pdf`), suitable for reading.
+  - `/analysis/paper`: Quarto source document for the manuscript (`paper.qmd`; the originally submitted version is kept in `analysis/tracked-archive/paper.qmd`) and supplementary material (`supplement.qmd`). It also has a rendered versions, `paper.docx` (and `supplement.pdf`), suitable for reading.
   - `/analysis/data`: Data used in the analysis. All data in this folder is created by running scripts in the analysis folder. Note that the data used in the case study is part of the `seqwrappaper` package (`seqwrappaper::pillon_counts`).
-  - `/analysis/data/raw_data/`:  Data derived from simulation experiments are stored here either after running simulations locally, or after downloading simulated data sets from Dataverse.no. See below for details.
-  - `/analysis/data/derived_data/`: Intermediate analyses and cache files used for reporting. 
-  - `/analysis/figures`: Scripts for producing figures 2-4 and reproduce some of the results presented in the main text. 
+  - `/analysis/data/raw_data/`:  Data derived from simulation experiments are stored here either after running simulations locally, or after downloading simulated data sets from Dataverse.no. See below for details. The raw methylation arrays (GEO accession GSE114763) used in the DNA methylation case study are downloaded here by `analysis/R/methylation-case-study-dataprep.R`.
+  - `/analysis/data/derived_data/`: Intermediate analyses and cache files used for reporting, including the methylation case-study results (`permutation_v4/`, `full_v3/`, `timing_v1/`).
+  - `/analysis/figures`: Scripts for producing figures 2-5 and reproduce some of the results presented in the main text. 
+  - `/analysis/archive`: Superseded scripts and results that are not used by the revised manuscript (not tracked by git).
  
  
 ### Downloading simulated data and estimates

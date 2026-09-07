@@ -45,7 +45,8 @@ source(here::here("analysis/R/simulation-functions.R"))
 #
 # overwrite_models  refit the five real-data (Pillon) models. > 2 hours.
 # make_sim          re-run both simulation scenarios. > 24 hours.
-# make_meth_perm    re-run the methylation permutation study. Hours.
+# make_meth         re-run the methylation case study (data prep, permutation
+#                   study, full run). About two days on 16 cores.
 #
 # overwrite_models MUST be TRUE when re-running against seqwrap >= 0.8.0 with
 # cached results produced by an earlier version. The seqwrapResults class
@@ -58,7 +59,7 @@ source(here::here("analysis/R/simulation-functions.R"))
 
 overwrite_models <- FALSE
 make_sim <- FALSE
-make_meth_perm <- FALSE
+make_meth <- FALSE
 
 # Detect cores
 cores <- parallel::detectCores()
@@ -111,40 +112,52 @@ if (!dir.exists(here::here("analysis/data/raw_data"))) {
 }
 
 
+# Methylation case study -----------------------------------------------------
+#
+# Three scripts, run in this order. Each skips work whose output already
+# exists, so an interrupted run resumes by setting make_meth <- TRUE again.
+#
+# 1. analysis/R/methylation-case-study-dataprep.R
+#    Downloads the raw arrays (GSE114763, ~757 MB) from GEO into
+#    analysis/data/raw_data/GSE114763/ and writes seaborne-rgset.RDS,
+#    seaborne-metadata.RDS and the quantile normalized, probe-filtered
+#    seaborne-gset-quantile.RDS to analysis/data/derived_data/. ~15 min.
+#    paper.qmd reads pheno_raw.rds and the gset directly.
+#
+# 2. analysis/R/methylation-error-permutation.R
+#    Type I error and power from within-participant permuted data: 200
+#    iterations x 4 model arms, one file per iteration, written to
+#    analysis/data/derived_data/permutation_v4/. ~25 h on 16 cores.
+#    paper.qmd and figure-5.R source it themselves when the directory
+#    is empty; running it here makes the job a deliberate step instead.
+#
+# 3. analysis/R/methylation-case-full.R
+#    The two REML arms on all 770 441 sites, written to
+#    analysis/data/derived_data/full_v3/ (beta_reml.RDS, m_reml.RDS, their
+#    -meta files and timing.RDS). ~20 h on 16 cores. paper.qmd and
+#    figure-5.R STOP if the arm files are missing rather than refit.
+#
+# The two long scripts run in their own R process: the full run holds a
+# results object of the order of a gigabyte, and a fresh process per step
+# returns memory between steps.
+#
+# NOT run here: analysis/R/methylation-timing-experiment.R, which produced
+# analysis/data/derived_data/timing_v1/ (Figure 5 F-G). It was run against the
+# earlier, functionally normalized gset (seaborne-gset-normalized.RDS) and
+# validates its extrapolation against full_v2/timing.RDS, the four-arm run on
+# those same arrays. Both files are kept in derived_data for that reason; the
+# full_v2 arm files are in analysis/archive/. paper.qmd also reads
+# full_v2/timing.RDS for the quoted full-run hours so that the text and Figure
+# 5 G describe the same run. Timing does not depend on the normalization, so
+# the experiment was not repeated on the quantile gset.
 
-# Methylation permutation study ----------------------------------------------
-#
-# analysis/R/methylation-error-permutation.R estimates type I error rates for
-# the beta and M-value models from within-participant permuted ("plasmode")
-# data: 500 permutations x 1000 sites x 4 model arms, written one file per
-# permutation into analysis/data/derived_data/permutation_v2/.
-#
-# The script skips a permutation whose file already exists, so an interrupted
-# job resumes simply by running it again. Note that permutation_v2/ is a NEW
-# directory: permutation/ holds the earlier two-arm run, kept because its
-# evaluation columns use the old names and the two cannot be pooled.
-#
-# case-study-methylation.qmd sources this script itself when the directory is
-# empty. Running it here instead makes a job of several hours a deliberate
-# step rather than a side effect of rendering a document.
-#
-# Inputs are produced by analysis/R/methylation-case-study-dataprep.R, which
-# downloads the raw arrays from GEO and writes the rgset, the sample metadata
-# and the normalized, probe-filtered gset.
-
-if (make_meth_perm) {
+if (make_meth) {
   der <- here::here("analysis/data/derived_data")
   meth_inputs <- file.path(
     der,
-    c("seaborne-gset-normalized.RDS", "seaborne-metadata.RDS")
+    c("seaborne-gset-quantile.RDS", "seaborne-metadata.RDS")
   )
 
-  # Data preparation. Every DOWNLOAD in that script is guarded by
-  # file.exists(): the SOFT series metadata (pheno_raw.rds), the ~757 MB
-  # GSE114763_RAW.tar, and the untar/gunzip of the IDATs. So is the rgset
-  # build and the normalization. Re-running never re-downloads and never
-  # redoes work that is already on disk; the source() below is skipped
-  # entirely once both outputs exist.
   if (!all(file.exists(meth_inputs))) {
     source(here::here("analysis/R/methylation-case-study-dataprep.R"))
   }
@@ -156,14 +169,21 @@ if (make_meth_perm) {
     )
   }
 
-  source(here::here("analysis/R/methylation-error-permutation.R"))
+  rscript <- file.path(R.home("bin"), "Rscript")
+  for (s in c(
+    "analysis/R/methylation-error-permutation.R",
+    "analysis/R/methylation-case-full.R"
+  )) {
+    status <- system2(rscript, here::here(s))
+    if (status != 0) stop(s, " failed with status ", status, call. = FALSE)
+  }
 }
-
 
 # Source figure files (these are needed for the manuscript and supplement)
 source(here::here("analysis/figures/figure-2.R"))
 source(here::here("analysis/figures/figure-3.R"))
 source(here::here("analysis/figures/figure-4.R"))
+source(here::here("analysis/figures/figure-5.R"))
 
 # Render documentation
 quarto::quarto_render(here::here("analysis/paper/supplement.qmd"))
