@@ -10,6 +10,12 @@ source(here::here("analysis/figures/figure-opts.R"))
 
 
 cores <- parallel::detectCores()
+
+if (file.exists(here::here("analysis/data/derived_data/m1_results.RDS"))) {
+  m1_results <- readRDS(here::here("analysis/data/derived_data/m1_results.RDS"))
+}
+
+
 # make-docs.R fits the models before sourcing this script, so `m1_results`
 # is normally already present. The fallback below is for sourcing this
 # script directly. Guard on `m1_results`, not on `run_model1`: the latter
@@ -272,5 +278,15 @@ ggsave(
   device = cairo_pdf,
   height = 120,
   width = 170,
+  units = "mm"
+)
+
+ggsave(
+  here::here("analysis/figures/figure-2.png"),
+  figure2,
+  dpi = 600,
+  height = 120,
+  width = 170,
+  bg = "white",
   units = "mm"
 )

@@ -723,3 +723,14 @@ ggsave(
   width = 170,
   units = "mm"
 )
+
+ggsave(
+      here::here("analysis/figures/figure-4.png"),
+      figure4,
+      bg = "white",
+      dpi = 600,
+      height = 200,
+      width = 170,
+      units = "mm"
+)
+

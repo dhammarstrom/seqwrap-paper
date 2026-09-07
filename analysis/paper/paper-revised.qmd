@@ -48,8 +48,8 @@ abstract: |
       `#text(size: 10pt)[`{=typst}
       `#place(bottom + left, dy: 4em)[#line(length: 40%) #v(0em) #text(size: 9pt)[#super[£] Corresponding author: Daniel Hammarström, daniel.hammarstrom\@inn.no]]`{=typst}
       *Background:* High-dimensional omics data from complex experimental designs, particularly those with hierarchical structures such as repeated measures, require flexible statistical modeling approaches. While traditionally used packages for, e.g., RNA-seq analysis, include mechanisms for parameter shrinkage to increase statistical efficiency, they often limit modeling flexibility, including choices of distributional assumptions and random-effects structures necessary for hierarchical data. Currently, there is a lack of tools that enable empirical Bayes shrinkage mechanisms in hierarchical data models and support a general workflow across different types of omics data.
-      *Results:* We present seqwrap, an R package that provides a flexible framework for iterative modeling of high-dimensional data using established R-based regression packages. Leveraging recent developments in the glmmTMB package, seqwrap can enable a two-step approach to fit negative binomial and Poisson observation-level random effect mixed-effects models with empirical Bayes shrinkage of model parameters. In simulations of RNA-seq data from a repeated-measures design, we use seqwrap to show that regularized models substantially outperformed non-informed models and mixed-effects models using transformed counts, with higher sensitivity for detecting differentially expressed genes while maintaining false discovery rates below nominal levels. Regularization also improved model convergence, producing valid estimates for >99.9% of gene targets compared to 85-90% for non-informed count-based models. In real-world data, flexibility in defining distributional assumptions enabled thorough examination of model assumptions and robust sensitivity analysis across modeling approaches.
-      *Conclusions:* seqwrap enables flexible, principled workflows for analyzing high-dimensional data from complex experimental designs with hierarchical structures. By combining established modeling frameworks with empirical Bayes regularization, seqwrap provides improved statistical performance and model convergence compared to both transformation-based approaches and non-informed models while maintaining generalizability across diverse omics data types.
+      *Results:* We present seqwrap, an R package that provides a flexible framework for iterative modeling of high-dimensional data using established R-based regression packages. Leveraging recent developments in the glmmTMB package, seqwrap can enable a two-step approach to fit negative binomial and Poisson observation-level random effect mixed-effects models with empirical Bayes shrinkage of model parameters. In simulations of RNA-seq data from a repeated-measures design, we use seqwrap to show that regularized models substantially outperformed non-informed models and mixed-effects models using transformed counts, with higher sensitivity for detecting differentially expressed genes while maintaining false discovery rates below nominal levels. Regularization also improved model convergence, producing valid estimates for >99.9% of gene targets compared to 85-90% for non-informed count-based models. In a second case study of DNA methylation arrays (770,441 CpG sites) with repeated measures, beta and Gaussian mixed-effects models fitted with restricted maximum likelihood (REML) and Satterthwaite's denominator degrees of freedom held the nominal type I error rate in permutation-based plasmode data, whereas maximum likelihood with asymptotic Wald tests did not. The study was under-powered for the observed effect sizes, explaining the absence of differentially methylated sites after multiplicity adjustment.
+      *Conclusions:* seqwrap enables flexible, principled workflows for analyzing high-dimensional data from complex experimental designs with hierarchical structures. By combining established modeling frameworks with empirical Bayes regularization, seqwrap provides improved statistical performance and model convergence compared to both transformation-based approaches and non-informed models and, through REML estimation and Satterthwaite's method in generalized linear mixed models, calibrated inference for non-Gaussian outcomes, verifiable for a given design with plasmode data, while maintaining generalizability across diverse omics data types.
 keywords: |
   High-dimensional data, RNA-seq, hierarchical models, shrinkage
 editor_options:
@@ -861,7 +861,7 @@ if (show_figures) {
 ### DNA methylation analysis
 
 ```{r}
-#| label: get-permute-data
+#| label: methylation-analysis
 #| echo: false
 
 
@@ -1078,25 +1078,196 @@ gset <- readRDS(
 
 n_fits <- dim(gset)[1]
 
-# Number of issues 
-n_fit_issues <- full_errors |> 
-      filter(stage == "fit") |> 
-      summarise(.by = c(type, model), 
-                n = n()) |>  
-      pull(n)
+# Number of targets that raised a condition (warning or error) at the fit
+# stage. full_errors has one row per condition, so a target with two
+# warnings would be counted twice without the distinct(). Counted per model
+# and looked up by name below, so the figures cannot swap if a further
+# condition type appears.
+n_fit_issues <- full_errors |>
+      filter(stage == "fit") |>
+      distinct(model, target) |>
+      summarise(.by = model,
+                n = n())
+
+n_warn <- function(m) n_fit_issues$n[n_fit_issues$model == m]
+  
+# Number of no satterthwaite p-value
+
+# First extract the models with 
+no_satt <- res |> 
+      filter(is.na(p_satt)) |> 
+      distinct(target, model) 
+
+# Summarise number of models with failed p-value for any parameter
+no_satt_n <- no_satt |>
+      summarise(.by = model,
+                n = n())
+
+# Looked up by name for the text; a model with no failures returns 0 rather
+# than an empty vector.
+n_no_satt <- function(m) {
+  n <- no_satt_n$n[no_satt_n$model == m]
+  if (length(n) == 0) 0L else n
+}
+
+
+total_frac <- res |> 
+      mutate(.by = c(model,target ), 
+             p_satt = any(is.na(p_satt))) |> 
+      filter(convergence == 0, 
+             !singular, 
+             !p_satt) |> 
+
+      distinct(target, model) |> 
+      summarise(.by = model, 
+                n = n()) |> 
+      mutate(frac = 100 * (n /n_fits)) |> 
+      summarise(frac = mean(frac)) |> 
+      pull(frac)
+
+# Power vs. effect statistics and calculations #################
+
+# This gives size-adjusted power per delta vs the size of the observed estimates.
+# This relates to figure-5.R: REML arms, Satterthwaite p-values, critical value from
+# the permutation null pooled over strata (Lloyd 2005).
+
+# We are setting the alpha level to 5%
+alpha <- 0.05
+
+# Use the permutation data set and filter to get only converged models
+# without satterthwaite issues
+pow_dat <- perm_dat |>
+    dplyr::filter(
+      convergence == 0,
+      term %in% alt_terms,
+      grepl("_reml$", model),
+      !is.na(p_satt)
+    ) |>
+    dplyr::mutate(is_alt = delta != 0, delta_abs = abs(delta))
+
+# Critical value: the largest p such that the null rejection rate is <= alpha.
+# This is the size correction. 
+crit <- pow_dat |>
+      # Use only the null effects
+    dplyr::filter(!is_alt) |>
+    dplyr::summarise(
+      .by = model,
+      # Rank the p-values and select k, the p-value corresponding to 
+      # alpha percentile.
+      c_hat = {
+        p <- sort(p_satt)
+        k <- floor(alpha * length(p))
+        if (k < 1) 0 else p[k]
+      }
+    )
+
+
+# Power per model and delta: mean within iteration first, then over iterations,
+# so an unbalanced cell does not weight the pooled figure.
+power_delta <- pow_dat |>
+      # Use only true effects
+    dplyr::filter(is_alt, 
+                  convergence == 0, 
+                  !is.na(p_satt)) |>
+      # Join with the critical values (per model)
+    dplyr::inner_join(crit, by = "model") |>
+    dplyr::summarise(
+      .by = c(model, delta_abs, iter),
+      # fraction below criticalø value
+      power = mean(p_satt <= c_hat)
+    ) |>
+      # Summarise over model and effect size
+    dplyr::summarise(
+      .by = c(model, delta_abs),
+      n = n(),
+      mcse = sd(power) / sqrt(n),
+      power = mean(power)
+    )
+
+# Share of full-data estimates at or above each delta, per model and contrast.
+# `res` is already REML only, with est_M on the M scale for both arms.
+effect_share <- res |>
+    dplyr::filter(convergence == 0) |>
+    tidyr::crossing(delta_abs = sort(unique(power_delta$delta_abs))) |>
+    dplyr::summarise(
+      .by = c(model, term, delta_abs),
+      share = mean(abs(est_M) >= delta_abs)
+    )
+
+power_vs_effect <- dplyr::inner_join(
+    power_delta, effect_share, by = c("model", "delta_abs")
+  )
+
+# Smallest grid delta at which power reaches 50%, and the share of estimates
+# reaching it, for the text. Pooled over the three contrasts.
+delta_50 <- power_delta |>
+    dplyr::filter(power >= 0.5) |>
+    dplyr::summarise(.by = model, delta_50 = min(delta_abs)) 
+
+# Check that the models are the same here
+stopifnot(length(unique(delta_50$delta_50)) == 1) 
+
+# Get the estimate
+delta_50_display <- delta_50 |>      
+            summarise(delta_50 = min(delta_50)) |> 
+      pull(delta_50)
+      
+      
       
 
+share_50 <- res |>
+    dplyr::filter(convergence == 0) |>
+    dplyr::inner_join(delta_50, by = "model") |>
+    dplyr::summarise(.by = model, share = mean(abs(est_M) >= delta_50)) |>
+      summarise(share = round(mean(share) * 100, 1)) |>
+      pull(share)
+
+# Power and share of estimates at a named grid point, pooled over the two
+# models (and, for the share, over the three contrasts), for the text. The
+# power crossing at 50% sits between two grid points, so the text reports the
+# grid points on either side rather than a threshold read off a coarse grid.
+pow_at <- function(d) {
+  stopifnot(d %in% power_delta$delta_abs)
+  round(100 * mean(power_delta$power[power_delta$delta_abs == d]))
+}
+share_at <- function(d) {
+  stopifnot(d %in% effect_share$delta_abs)
+  round(100 * mean(effect_share$share[effect_share$delta_abs == d]))
+}
+
+# Spread of estimates under the null, for context: the observed estimates are
+# the true effects plus this noise.
+null_q95 <- pow_dat |>
+    dplyr::filter(!is_alt) |>
+    dplyr::mutate(est_M = if_else(grepl("beta", model), estimate / log(2), estimate)) |>
+    dplyr::summarise(.by = model, q95 = quantile(abs(est_M), 0.95)) |> 
+      summarise(q95 = round(mean(q95), 2)) |> 
+      pull(q95)
+
+# Same filter as effect_share and share_50, so the three figures describe the
+# same set of fits.
+obs_q95 <- res |>
+      dplyr::filter(convergence == 0) |>
+      dplyr::summarise(.by = model, q95 = quantile(abs(est_M), 0.95)) |>
+      summarise(q95 = round(mean(q95), 2)) |> 
+      pull(q95)
 
 
+## Elapsed time REML an ML
+timing <-  readRDS(here::here("analysis/data/derived_data/full_v2/timing.RDS"))
 
+
+beta_reml_time <- timing[timing$model == "beta_reml", "hours"]
+m_reml_time <- round(timing[timing$model == "m_reml", "hours"], 1)
+m_ml_time <- timing[timing$model == "m", "hours"]
 
 ```
 
-[Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by Satterthwaite's method for approximating the denominator degrees of freedom, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 B). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 B). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 C).]{custom-style="edits"}     
+[Using the permutation experiment, we first assessed the type I error rate of the two candidate models using either maximum likelihood (ML) or restricted maximum likelihood (REML), followed by Satterthwaite's method for approximating the denominator degrees of freedom, which enables the derivation of p-values from a corrected t-distribution. For both the &beta; and M value models, REML estimation followed by the Satterthwaite correction reduced the type I error rate towards the nominal 5% level, although in the most extreme &beta; value strata the type I errors were slightly elevated (@fig-figure5 B). As the mean estimates are the same across estimators and model definitions, the standard errors were the primary source of variation in type I error rates, with smaller values in the ML model compared to the REML model fits (@fig-figure5 C). We evaluated the size-corrected power between the &beta; and M value models fitted with REML and confirmed that they had near-identical power profiles over the evaluated effects and over all &beta; value strata (@fig-figure5 D).]{custom-style="edits"}     
 
-[Following the permutation experiment, we used the most appropriate models (REML estimator) to model the full data sets. Both model types (&beta; and M value models) were fitted with a low rate of convergence issues; out of a total of `r n_fits`, `r n_fit_issues[1]` and `r n_fit_issues[2]` were identified as having convergence issues, for the &beta; and M value models, respectively. Among successful fits, the estimated effect sizes (M-value units) indicated that overall effects in the data set were small (@fig-figure5 E). Indeed, after p-value adjustment (False discovery rate < 0.05), no sites could be declared as differentially methylated.]{custom-style="edits"}
+[Following the permutation experiment, we used the most appropriate models (REML estimator) to model the full data sets. Both model types (&beta; and M value models) were fitted with a low rate of fitting problems; out of a total of `r n_fits` targets, `r n_warn("beta_reml")` and `r n_warn("m_reml")` raised warnings during fitting, for the &beta; and M value models, respectively. Additionally, `r n_no_satt("beta_reml")` and `r n_no_satt("m_reml")` model fits had at least one contrast with a missing p-value from the Satterthwaite computation in the &beta; and M models, respectively, indicating that the approximation of the degrees of freedom could not be computed for these fits. Among successful fits (on average `r round(total_frac, 2)`% of targets per model), the estimated effect sizes, expressed in M-value units for both models, were small (@fig-figure5 E). Ninety-five percent of estimates fell within &pm;`r obs_q95` M-units, which matches the spread of estimates under the permutation null (&pm;`r null_q95` M-units), where no effect is present. In the permutation experiment, size-adjusted power at a per-site &alpha; of 0.05 was `r pow_at(0.2)`% for an added effect of 0.2 M-units and `r pow_at(delta_50_display)`% for `r delta_50_display` M-units (@fig-figure5 D), whereas only `r share_at(0.2)`% and `r share_50`% of estimated effects reached these magnitudes. As this power is an upper bound for a test that controls the false discovery rate, the absence of differentially methylated sites after p-value adjustment (FDR < 0.05) is the expected outcome at this sample size.]{custom-style="edits"}
 
-[Finally, we assessed the time cost of running seqwrap across different model specifications. We found that, for a given model specification, after a fixed start-up cost associated with initiating parallelization, elapsed time scaled linearly with the number of targets in the data set (@fig-figure5 F). Using smaller subsets of the full data sets (number of targets $\le$ 4000), we could predict the final computational cost for the full data sets (m = `r n_fits` targets) within 5% (@fig-figure5 G), indicating that linearity scales up to `r n_fits` fits for this data set (38 samples). The different model specifications used to derive @fig-figure5 F and G varied in complexity and scope, with the most costly fits incorporating the Satterthwaite correction, which adds an additional computation per fit.]{custom-style="edits"} 
+[Finally, we assessed the time cost of running seqwrap across different model specifications. We found that, for a given model specification, after a fixed start-up cost associated with initiating parallelization, elapsed time scaled linearly with the number of targets in the data set (@fig-figure5 F). Using smaller subsets of the full data sets (number of targets $\le$ 4000), we could predict the final computational cost for the full data sets (m = `r n_fits` targets) within 5% (@fig-figure5 G), indicating that linearity scales up to `r n_fits` fits for this data set (38 samples). The different model specifications used to derive @fig-figure5 F and G varied in complexity and scope, with the most costly fits taking > `r m_reml_time` hours and incorporating the Satterthwaite correction, which adds additional computation per fit (on a 16-core personal computer).]{custom-style="edits"} 
 
 
 
@@ -1139,15 +1310,15 @@ To highlight one such opportunity, we include a Poisson OLRE model in our compar
 
 Using estimates from the real-world data in downstream gene set enrichment analysis, we observed high overlap between the models. This agreement between models could be explained by a strong biological signal, together with results from our simulations, which indicate that, in the low-dispersion-variability scenario, correlations between true and estimated population effects were more stable across models. Our high-variability-dispersion scenario represented an extreme case of variation, which increased the utility of regularization. Importantly, gene set enrichment analysis is not performed in isolation but rather as a complement to differential expression analysis. Additionally, several proposed metrics for gene set analysis also include measures of uncertainty, such as the minimum significant difference [@zyla2017], highlighting the importance of powerful estimation.
 
-[In our second case study, we evaluated potential modeling decisions by analyzing methylation data obtained from an array-based platform [@seaborne2018]. Our permutation experiment showed that the choice of estimator (REML vs. ML) and the correction of the reference distribution used to derive p-values using Satterthwaite's method for approximating the degrees of freedom for the denominator were important for unbiased inference. However, the choice of outcome measure, &beta; values, restricted to the 0-1 interval, or M values being the logit transform of &beta; values did not affect inference as long as the appropriate distributional model was used (beta- and Gaussian regression, respectively). The novelty of our proposed R package is making REML estimation and Satterthwaite's method, as implemented in glmmTMB, available the context of generalized linear mixed models for per-target analysis of high-dimensional data, enabling unbiased estimation of the more intuitive &beta; values. Conversely, &beta; values modeled under the normal distribution will violate the assumptions of equal variance (homoscedasticity), which will bias inference [@du2010]. Although REML estimation is standard practice in linear mixed models, it has not been so in generalized linear mixed models with alternative distributional models and link functions [@maestrini2026]. However, results indicate that REML provides unbiased estimation of variance components in generalized linear mixed models [@maestrini2026], which, together with our more specific study, supports the general use of REML in omics analyses. Recently, the Satterthwaite method was experimentally introduced in the glmmTMB package for non-normal models as well. Here, we evaluated its use in beta regression, with favorable results supporting its potential as an addition to omics workflows for other outcomes and distributional assumptions. Importantly, our permutation experiment could be used to validate its use in the specific context of the study design and data characteristics. Together, the use of REML and Satterthwaite's method shows promise as a general route for omics-type analyses.]{custom-style="edits"}
+[In our second case study, we evaluated potential modeling decisions by analyzing methylation data obtained from an array-based platform [@seaborne2018] and synthesizing plasmode datasets via permutations, thereby retaining important characteristics of the original dataset [@gadbury2008]. Our permutation experiment showed that the choice of estimator (REML vs. ML) and the correction of the reference distribution used to derive p-values using Satterthwaite's method for approximating the degrees of freedom for the denominator were important for valid inference. However, the choice of outcome measure, &beta; values, restricted to the 0-1 interval, or M values being the logit transform of &beta; values did not affect inference as long as the appropriate distributional model was used (beta- and Gaussian regression, respectively). The novelty of our proposed R package is to make REML estimation and Satterthwaite's method, as implemented in glmmTMB, available in the context of generalized linear mixed models for per-target analysis of high-dimensional data, enabling better-calibrated estimates of the more intuitive &beta; values. Conversely, &beta; values modeled under the normal distribution will violate the assumptions of equal variance (homoscedasticity), which will bias inference [@du2010]. Although REML estimation is standard practice in linear mixed models, it has not been so in generalized linear mixed models with alternative distributional models and link functions [@maestrini2026]. However, results indicate that REML provides unbiased estimation of variance components in generalized linear mixed models [@maestrini2026], which, together with our more specific permutation study, supports the general use of REML in omics analyses. Recently, the Satterthwaite method was experimentally introduced in the glmmTMB package for non-normal models as well. Here, we evaluated its use in beta regression, with favorable results supporting its potential as an addition to omics workflows for other outcomes and distributional assumptions. Importantly, our permutation experiment could be used to validate its use in the specific context of the study design and data characteristics. Together, the use of REML and Satterthwaite's method shows promise as a more general route for omics-type analyses.]{custom-style="edits"}
 
-[Although we demonstrate `seqwrap` using transcriptomic and epigenomic data, its design is not tied to any specific biological data type. It requires only a target-by-sample matrix (or a list of such matrices), corresponding sample metadata, and user-specified model-fitting function (e.g., `lme4`, `nlme`, `glmmTMB`, `mgcv`) and arguments. Consequently, `seqwrap` places no restrictions on the nature of the target being analysed. The target may be a transcript, splicing event, protein, metabolite, methylation site etc. provided the data is arranged to fit the input specifications. This generality also extends to the choice of statistical models. Count-based measurements, such as transcriptomic data can be analyzed using Poisson or negative binomial distributions. Proportion-based outcomes, including e.g., splicing efficiency data, methylation status or compositional outcomes, such as microbiome relative abundance data, can be modeled using the beta distribution. Continuous measurements that are approximately Gaussian, such as many proteomic or metabolomic data, can be analyzed using models with normally distributed errors. Likewise, data characterized by excess zeros, such as peptide-level measurements affected by detection limits, can be analysed using zero-inflated distributions. The modelling algorithms supported by `seqwrap` position the package as a general-purpose framework for applying modern regression modelling approaches to a wide range of high-dimensional biological datasets. However, using modeling algorithms constructed for a single outcome and applying them to a high-dimensional data set for parallel estimation likely scales these algorithm to a problem for which they were not optimized leading to higher computational costs compared to tools optimized for high-dimensional data. Indeed, our case study analyzed >700,000 CpG sites and small differences between model specifications and evaluation methods resulted in large differences in elapsed time ]{custom-style="edits"} 
+[Using seqwrap with the model configurations that held their nominal size in the permutation experiment (REML with Satterthwaite DDF), we reanalyzed the full data set made available by Seaborne et al. [@seaborne2018b]. After adjustment for multiple testing (FDR < 0.05), no differentially methylated CpG sites were detected, whereas the original study reported tens of thousands of sites per contrast [@seaborne2018]. Two features of the original analysis account for this difference. The published lists were obtained at an uncorrected p < 0.05, and the reported test statistics correspond to a two-group comparison in which the repeated measurements from each participant were treated as independent. At the same uncorrected threshold, our models call a similar number of sites, which is what a 5% threshold returns over 770,000 positions regardless of whether any effect is present. The permutation experiment explains why no effects remained significant after adjustment: the estimated effects were no larger than those obtained under the permutation null, and size-adjusted power at these effect sizes was well below 50%. The absence of differentially methylated sites is therefore the expected outcome for a study of this size, and it is not evidence that resistance training leaves DNA methylation unchanged. Detecting effects of the magnitude estimated here would require substantially larger samples, consistent with published power estimates for array-based methylation studies [@mansell2019].]{custom-style="edits"} 
 
-[Consequently, `seqwrap` places no restrictions on the nature of the target being analyzed. The target may be a transcript, splicing event, protein, metabolite, methylation site, etc., provided the data is arranged to fit the input specifications. This generality also extends to the choice of statistical models. Count-based measurements, such as transcriptomic data, can be analyzed using Poisson or negative binomial distributions. Proportion-based outcomes, including, e.g., splicing efficiency data, methylation status, or compositional outcomes, such as microbiome relative abundance data, can be modeled using the beta distribution. Continuous measurements that are approximately Gaussian, such as many proteomic or metabolomic data, can be analyzed using models with normally distributed errors. Likewise, data characterized by excess zeros, such as peptide-level measurements affected by detection limits, can be analyzed using zero-inflated distributions. The modeling algorithms supported by `seqwrap` position the package as a general-purpose framework for applying modern regression modeling approaches to a wide range of high-dimensional biological datasets. However, using modeling algorithms designed for a single outcome and applying them to a high-dimensional data set for parallel estimation likely scales them to a problem for which they were not optimized, leading to higher computational costs than tools optimized for high-dimensional data. Indeed, our case study analyzed >700,000 CpG sites, and small differences between model specifications and evaluation methods resulted in large differences in elapsed time (~4 vs. 10 hours). We urge the user to carefully characterize their workflow before committing to a full analysis. This is true both in terms of computational cost and of subsequent inferential performance.]{custom-style="edits"}
+[Although our second case study indicated that the choice of distributional model (beta vs. Gaussian regression) did not affect conclusions, important aspects of model specifications did. Similarly, pre-model transformations made to enable mixed-effects modeling in available packages adversely affected model performance in the first case study. Together, our case studies point to flexibility in model specifications as an important feature of target-wise modeling of high-dimensional data sets. Indeed, by enabling the use of established R packages for high-dimensional, target-wise problems, we increase the available repertoire of model specifications for omics-type outcomes, such as count-based measurements like transcriptomic data, proportion-based outcomes, including, e.g., splicing efficiency data, methylation status, or microbiome relative abundance data, and continuous outcomes such as many proteomic or metabolomic data. However, this flexibility comes at a cost: using modeling algorithms designed for a single outcome and applying them to a high-dimensional data set for parallel estimation likely scales them to problems they were not optimized for, leading to higher computational costs than tools optimized for high-dimensional data. Importantly, using our second case study, we demonstrate the practical performance of the seqwrap package on very high-dimensional datasets (`r n_fits` CpG sites). The observed linear relationship between the number of targets and computational cost enables the user to assess the feasibility of complex model configurations and, e.g., custom summary functions for a given dataset, as the full computational cost can be predicted from a smaller subset. Indeed, across a very large dataset, small differences between model specifications and evaluation methods in computational cost per target resulted in large differences in elapsed time across the full dataset (~4 vs. 10 hours). We could attribute the differences between these model specifications to the use of an extra evaluation of the model to approximate the DDF used for the corrected p-value (the Satterthwaite correction). We urge the user to carefully characterize their workflow before committing to a full analysis. This is true both in terms of computational cost and of subsequent inferential performance.]{custom-style="edits"}
 
 ## Conclusions
 
-`seqwrap`, an R package for iterative modeling of high-dimensional data, enables flexible modeling via established R packages for regression modeling. Taking advantage of recent advances in the glmmTMB package, we have shown that an empirical Bayes procedure can be implemented in RNA-seq analysis using mixed-effects models. Such modeling strategies are easily extendible to other omics data types. The `seqwrap` package is available at The Comprehensive R Archive Network (CRAN).
+`seqwrap`, an R package for iterative modeling of high-dimensional data, enables flexible modeling via established R packages for regression modeling. Taking advantage of recent advances in the glmmTMB package, we have shown that an empirical Bayes procedure can be implemented in RNA-seq analysis using mixed-effects models. [In a second case study, we showed that REML estimation combined with Satterthwaite's approximation of the denominator degrees of freedom gives calibrated per-site inference in generalized linear mixed models of DNA methylation, on the &beta; scale as well as the M scale, and that plasmode data sets generated by permutation can verify this calibration for a given design before a full analysis is run.]{custom-style="edits"} Such modeling strategies are easily extendible to other omics data types. The `seqwrap` package is available at The Comprehensive R Archive Network (CRAN).
 
 ## Availability and requirements
 
