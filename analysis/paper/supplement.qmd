@@ -41,10 +41,10 @@ editor_options:
 ---
 
 
-## Installing `seqwrap`
+## Installing seqwrap
 
 
-`seqwrap` version 0.7.0 is available on [CRAN](https://CRAN.R-project.org/package=seqwrap). To install `seqwrap`: 
+seqwrap version 0.7.0 is available on [CRAN](https://CRAN.R-project.org/package=seqwrap). To install seqwrap: 
 
 ```{r}
 #| eval: false
@@ -65,11 +65,11 @@ pak::pkg_install("trainome/seqwrap")
 ```
 
 
-## Fitting models with `seqwrap`
+## Fitting models with seqwrap
 
-The `seqwrap` package is designed to iterate over multiple targets in a high-dimensional data set to fit a user-defined regression model using a user-selected model fitting function. Each target may represent, e.g., a gene, an exon, a protein, a methylation site, or any other outcome from a high-throughput omics platform. Each target is measured across a set of samples, with a metadata set used to describe study covariates. In the basic case, data and metadata are combined in each iteration to fit the selected model. 
+The seqwrap package is designed to iterate over multiple targets in a high-dimensional data set to fit a user-defined regression model using a user-selected model fitting function. Each target may represent, e.g., a gene, an exon, a protein, a methylation site, or any other outcome from a high-throughput omics platform. Each target is measured across a set of samples, with a metadata set used to describe study covariates. In the basic case, data and metadata are combined in each iteration to fit the selected model. 
 
-Dungan et al. [@dungan2022] evaluated a senolytic treatment (dasatinib and quercetin) in mouse skeletal muscle subjected to mechanical overload through synergist ablation. The study included sham surgery and a vehicle control, allowing analysis of the effect of senolytic treatment and the interaction between mechanical overloading and senolytic treatment. RNA-seq was performed on 20 animals (5 per group). The data are available in the `seqwrap` package under `dungan_counts`. We will load the data and filter low-expression genes.
+Dungan et al. [@dungan2022] evaluated a senolytic treatment (dasatinib and quercetin) in mouse skeletal muscle subjected to mechanical overload through synergist ablation. The study included sham surgery and a vehicle control, allowing analysis of the effect of senolytic treatment and the interaction between mechanical overloading and senolytic treatment. RNA-seq was performed on 20 animals (5 per group). The data are available in the seqwrap package under `dungan_counts`. We will load the data and filter low-expression genes.
 
 
 ```{r}
@@ -111,7 +111,7 @@ samples <- metadata |>
 
 ```
 
-The count data matrix can be manipulated as a data frame, with the first column indicating the targets (in this case, gene symbols). Importantly, additional column names have names corresponding to the `seq_sample_id` variable in the metadata. As an example, the first rows of the count data frame are shown for the same samples as in the metadata data frame (see @tbl-dungan-counts). `seqwrap` expects that targets are unique so before going further we should validate this in the data. When doing so we find that five targets have duplicate rows in the data set, for simplicity, we will remove them.   
+The count data matrix can be manipulated as a data frame, with the first column indicating the targets (in this case, gene symbols). Importantly, additional column names have names corresponding to the `seq_sample_id` variable in the metadata. As an example, the first rows of the count data frame are shown for the same samples as in the metadata data frame (see @tbl-dungan-counts). seqwrap expects that targets are unique so before going further we should validate this in the data. When doing so we find that five targets have duplicate rows in the data set, for simplicity, we will remove them.   
 
 ```{r}
 #| echo: false
@@ -164,7 +164,7 @@ y_{gi} &\sim \operatorname{NB2}(\mu_{gi}, \theta_g) \\
 \end{align}
 $$ {#eq-m1}
 
-Below, we are using the `edgeR` package to calculate the library size normalization factor. Effective library sizes are then expressed as relative to the median effective library and log transformed.
+Below, we are using the edgeR package to calculate the library size normalization factor. Effective library sizes are then expressed as relative to the median effective library and log transformed.
 
 ```{r}
 
@@ -187,9 +187,9 @@ metadata <- metadata |>
 ```
 
 
-`seqwrap_compose` is used to combine the data, metadata and the selected modelling function with its arguments into a `swobject`. A negative binomial model can be fitted using e.g., `glmmTMB` from the `glmmTMB package (glmmTMB::glmmTMB`) or `MASS::glm.nb`, here we will use `glmmTMB` as it can be extended in subsequent modelling steps. 
+`seqwrap_compose()` is used to combine the data, metadata and the selected modelling function with its arguments into a `swobject`. A negative binomial model can be fitted using e.g., `glmmTMB()` from the glmmTMB package (`glmmTMB::glmmTMB()`) or `MASS::glm.nb()`, here we will use `glmmTMB()` as it can be extended in subsequent modelling steps. 
 
-The specified `glmmTMB` function (`modelfun` slot) needs a formula and a family function, these are supplied in the arguments slot. The count data are supplied in the `data` slot and the metadata in the `metadata` slot.  Notice that we use the namespace operator (`::`) to specify selected functions to avoid difficulties in parallel processing. The `samplename` indicates the column name in the metadata that gives sample names.   
+The specified `glmmTMB()` function (`modelfun` slot) needs a formula and a family function, these are supplied in the arguments slot. The count data are supplied in the `data` slot and the metadata in the `metadata` slot.  Notice that we use the namespace operator (`::`) to specify selected functions to avoid difficulties in parallel processing. The `samplename` indicates the column name in the metadata that gives sample names.   
 
 
 ```{r}
@@ -205,7 +205,7 @@ m1.1 <- seqwrap_compose(
 
 ```
 
-Next, we will run the model using `seqwrap`. We recommend using `subset` to specify a smaller number of targets when prototyping the model. Here, we will assess whether the model output matches expectations. By specifying `return_models = TRUE`, all model objects will be returned in the results object, which can be inspected if needed. Here we are using a single core for fitting the models, specified in the `cores` argument.
+Next, we will run the model using `seqwrap()`. We recommend using `subset` to specify a smaller number of targets when prototyping the model. Here, we will assess whether the model output matches expectations. By specifying `return_models = TRUE`, all model objects will be returned in the results object, which can be inspected if needed. Here we are using a single core for fitting the models, specified in the `cores` argument.
 
 ```{r}
 
@@ -219,9 +219,9 @@ m1.1_temp <- seqwrap(
 
 ```
 
-Following iterative fitting using `seqwrap`, we can summarize the models using `seqwrap_summarise`, which produces a list of two summaries. Below, we are saving the summaries in an object for later access. Running the `seqwrap_summarise` function also gives us an overview of the model and successfully summarized targets.
+Following iterative fitting using `seqwrap()`, we can summarize the models using `seqwrap_summarise()`, which produces a list of two summaries. Below, we are saving the summaries in an object for later access. Running the `seqwrap_summarise()` function also gives us an overview of the model and successfully summarized targets.
 
-In the `summaries` slot, model parameter values are returned (see @tbl-dungan-sum-temp). These are produced using `broom.mixed::tidy` which is a general function to retrieve model parameters from many regression model packages in R. 
+In the `summaries` slot, model parameter values are returned (see @tbl-dungan-sum-temp). These are produced using `broom.mixed::tidy()` which is a general function to retrieve model parameters from many regression model packages in R. 
 
 In the `evaluations` slot, each model is evaluated using tests from the [DHARMa package](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html) (see @tbl-dungan-eval-temp). 
 
@@ -268,7 +268,7 @@ m1.1_temp_sum$evaluations |>
 
 ### Specifying summary and evaluation function
 
-We can specify custom functions for evaluating the model object. `seqwrap` allows for two slots (summaries and evaluations). Each function should take the model object as an argument, and for compatibility with `seqwrap_summarise`, return a data frame. For our next step, we would like to retrieve the dispersion parameter from each model. We will place this parameter in the evaluation function. We can extract the dispersion parameter on the log scale from the `glmmTMB` model object. We will construct a function around the extraction and include the observed counts from the data:
+We can specify custom functions for evaluating the model object. seqwrap allows for two slots (summaries and evaluations). Each function should take the model object as an argument, and for compatibility with `seqwrap_summarise()`, return a data frame. For our next step, we would like to retrieve the dispersion parameter from each model. We will place this parameter in the evaluation function. We can extract the dispersion parameter on the log scale from the glmmTMB model object. We will construct a function around the extraction and include the observed counts from the data:
 
 
 ```{r}
@@ -301,9 +301,9 @@ log(sigma(m1.1_temp@models[[1]]))
 
 ### Running the full model
 
-When we are happy with preliminary performance on a subset of targets, we can initialize `seqwrap` to iterate over all targets. We are updating the previous model with the new evaluation function directly in `seqwrap`. Notice that we also remove the `subset` and set `return_models` to `FALSE`. Saving all model objects will be too memory-consuming.
+When we are happy with preliminary performance on a subset of targets, we can initialize `seqwrap()` to iterate over all targets. We are updating the previous model with the new evaluation function directly in `seqwrap()`. Notice that we also remove the `subset` and set `return_models` to `FALSE`. Saving all model objects will be too memory-consuming.
 
-We should expect some errors from modelling many thousands of targets. As seen in the note from `seqwrap`, some models are associated with warnings from the modelling algorithm and/or errors from the evaluation function.
+We should expect some errors from modelling many thousands of targets. As seen in the note from `seqwrap()`, some models are associated with warnings from the modelling algorithm and/or errors from the evaluation function.
 
 
 ```{r}
@@ -336,9 +336,9 @@ warnings[1]
 ```
 
 
-### Using target data for prior information in `glmmTMB` 
+### Using target data for prior information in glmmTMB 
 
-A major benefit of canonical R packages for RNA-seq data modelling is the sharing of information between targets through shrinkage and empirical Bayes strategies. We suggest (see the main text) using priors in `glmmTMB` as convenient way of flexibly regularize models using an empirical Bayes strategy. In `glmmTMB`, the `priors` argument can be used to set priors on parameters. We will use the estimated parameters from the first model to set up the priors.
+A major benefit of canonical R packages for RNA-seq data modelling is the sharing of information between targets through shrinkage and empirical Bayes strategies. We suggest (see the main text) using priors in glmmTMB as convenient way of flexibly regularize models using an empirical Bayes strategy. In glmmTMB, the `priors` argument can be used to set priors on parameters. We will use the estimated parameters from the first model to set up the priors.
 
 First, we need to extract the parameters. From the evaluation function we get the average log count and the dispersion parameter estimate. From the summaries, we will get the other parameters (summarized in @fig-dungan-estimates).
 
@@ -391,7 +391,7 @@ plot_grid(
 ```
 
 
-Except for the dispersion values, we can easily summarize parameter values by their mean and standard deviation. A more elaborate summary of the dispersion values could include an estimate of the mean (log) dispersion, conditional on the average log counts. As the dispersion prior will be slightly different for each target (based on the observed counts), we will combine priors into target-specific data frames and store them as a list. `seqwrap` will make target-specific list elements available in each iteration, making it possible to build the prior data frame for `glmmTMB`.
+Except for the dispersion values, we can easily summarize parameter values by their mean and standard deviation. A more elaborate summary of the dispersion values could include an estimate of the mean (log) dispersion, conditional on the average log counts. As the dispersion prior will be slightly different for each target (based on the observed counts), we will combine priors into target-specific data frames and store them as a list. `seqwrap()` will make target-specific list elements available in each iteration, making it possible to build the prior data frame for `glmmTMB()`.
 
 ```{r}
 
@@ -454,7 +454,7 @@ for( j in 1:nrow( counts )) {
 ```
 
 
-Again, we will combine data, metadata, and arguments using `seqwrap_compose`. We are now also adding the priors to the arguments. The variables used in the priors data frame are made available from the target-specific list referenced in `targetdata = Prior_list`. Using `arguments = alist(... ` avoids evaluation of the list so that the data frame is not evaluated before being used in each iteration. Priors have been built corresponding what is expected by `glmmTMB` (see [Priors in glmmTMB](https://glmmtmb.github.io/glmmTMB/articles/priors.html)).
+Again, we will combine data, metadata, and arguments using `seqwrap_compose()`. We are now also adding the priors to the arguments. The variables used in the priors data frame are made available from the target-specific list referenced in `targetdata = Prior_list`. Using `arguments = alist(... ` avoids evaluation of the list so that the data frame is not evaluated before being used in each iteration. Priors have been built corresponding what is expected by `glmmTMB()` (see [Priors in glmmTMB](https://glmmtmb.github.io/glmmTMB/articles/priors.html)).
 
 ```{r}
 
@@ -544,16 +544,16 @@ m1.3_sum$summaries |>
 ```
 
 
-The above example shows how to build models with `seqwrap`. Importantly, we make no claims about the validity of the final model but urge the user to assess assumptions in their data and models as part of a principled workflow.
+The above example shows how to build models with seqwrap. Importantly, we make no claims about the validity of the final model but urge the user to assess assumptions in their data and models as part of a principled workflow.
 
 
-## Comparing `lmerSeq` and `seqwrap`
+## Comparing lmerSeq and seqwrap
 
-`lmerseq` is a package for fitting RNA-seq data using mixed-effects models assuming Gaussian errors on transformed count data. Here, we perform a basic comparison between `lmerseq` [@vestal_lmerseq_2022] and `seqwrap`, using a subset from the gene expression data set presented in the main text from Pillon et al. [@pillon2022].
+lmerSeq is a package for fitting RNA-seq data using mixed-effects models assuming Gaussian errors on transformed count data. Here, we perform a basic comparison between lmerSeq [@vestal_lmerseq_2022] and seqwrap, using a subset from the gene expression data set presented in the main text from Pillon et al. [@pillon2022].
 
 ### Data preprocessing
 
-Here the Pillion gene expression data is downloaded and transformed using VST transform from `DESeq2` as suggested in [@vestal_lmerseq_2022].
+Here the Pillion gene expression data is downloaded and transformed using VST transform from DESeq2 as suggested in [@vestal_lmerseq_2022].
 
 ```{r}
 #| label: comp-data
@@ -617,9 +617,9 @@ vst_expr <- vst_expr[1:15,]
 ```
 
 
-### Fitting models in `lmerseq`
+### Fitting models in lmerSeq
 
-`lmerseq` has a `lmerseq.fit()` function for building and fitting the model.
+lmerSeq has a `lmerseq.fit()` function for building and fitting the model.
 
 ```{r}
 #| label: lmerseq
@@ -656,9 +656,9 @@ lmerseq_summary <- coefs |>
 ```
 
 
-### Fitting models in transformed data in `seqwrap`
+### Fitting models in transformed data in seqwrap
 
-Below we are building the same model with `seqwrap`. We are using `lmerTest::lmer` to get p-values from each model. `lmerseq` filters targets from the output due to singular fit, here we add a small function that evaluates singular fits in the `lme4`-based model. We will use only models with non-singular fits in the comparison.   
+Below we are building the same model with seqwrap. We are using `lmerTest::lmer()` to get p-values from each model. lmerSeq filters targets from the output due to singular fit, here we add a small function that evaluates singular fits in the lme4-based model. We will use only models with non-singular fits in the comparison.   
 
 ```{r}
 #| label: seqwrap
@@ -711,14 +711,14 @@ seqwrap_summary_df <- seqwrap_summarise(seqwrap_model,
 
 ```
 
-### Comparing results from `lmerseq`and `seqwrap`
+### Comparing results from lmerSeq and seqwrap
 
-Since both `lmerseq`and `seqwrap` uses the same underlying model and data, the output estimates are the same. The estimates and p-values of both approaches are visualized in @fig-comp-visualisation
+Since both lmerSeq and seqwrap uses the same underlying model and data, the output estimates are the same. The estimates and p-values of both approaches are visualized in @fig-comp-visualisation
 
 ```{r}
 #| label: fig-comp-visualisation
 #| echo: false
-#| fig-cap: "Comparing estimates from `lmerseq` and `seqwrap`"
+#| fig-cap: "Comparing estimates from lmerSeq and seqwrap"
 #| fig-height: 8
 
 
@@ -772,9 +772,9 @@ plot_grid(p1, p2, ncol = 1)
 ```
 
 
-## Fitting the negative binomial and Poisson OLRE models using `seqwrap`
+## Fitting the negative binomial and Poisson OLRE models using seqwrap
 
-In the analyses presented in the main text, we used a negative binomial model as the point of departure for the analyses. The model was fitted in `seqwrap` using `glmmTMB` with the `nbinom2` family function. Below we show the code for fitting the model described in Eq. 1 (Negative binomial (non-informed)).
+In the analyses presented in the main text, we used a negative binomial model as the point of departure for the analyses. The model was fitted in `seqwrap()` using `glmmTMB()` with the `nbinom2()` family function. Below we show the code for fitting the model described in Eq. 1 (Negative binomial (non-informed)).
 
 We used the TMM-method [@robinson2010] for calculating the effective library size before adding it to the metadata as log-transformed library sizes relative to the median-sized library. We are using the DHARMa package [@DHARMa] in a custom evaluation function (`sigma_summary2`), which also include additional metrics. 
 
@@ -895,7 +895,7 @@ m1_results <- seqwrap(m1,
 
 ```
 
-The Poisson Observation-Level Random Effect (OLRE) model was fitted using `glmmTMB` using the `stats::poisson` family function. The same data and metadata as prepared above was used. The below code corresponds to Eq. 2 in the main text (Poisson OLRE (non-informed)). Notice that the sample id variable is used to introduce the observation-level random effect into the model.
+The Poisson Observation-Level Random Effect (OLRE) model was fitted using `glmmTMB()` using the `stats::poisson()` family function. The same data and metadata as prepared above was used. The below code corresponds to Eq. 2 in the main text (Poisson OLRE (non-informed)). Notice that the sample id variable is used to introduce the observation-level random effect into the model.
 
 ```{r}
 #| eval: false
@@ -1642,7 +1642,7 @@ bind_rows(gsea_up, gsea_down) |>
 
 ## Comparing elapsed time 
 
-Choosing the most appropriate modeling strategy for high-dimensional data can entail a high computational cost. `seqwrap` records the elapsed time for fitting a set of models. This estimate can assist in selecting modeling strategies. To retrieve the elapsed time:
+Choosing the most appropriate modeling strategy for high-dimensional data can entail a high computational cost. `seqwrap()` records the elapsed time for fitting a set of models. This estimate can assist in selecting modeling strategies. To retrieve the elapsed time:
 
 ```{r}
 # Example of elapsed time using different modeling strategies. 
@@ -1684,7 +1684,7 @@ results3@elapsed_time
 
 ```
 
-Below, we are comparing three different algorithms, `lme4::glmer.nb`, `glmmTMB` and `glmmTMB` using a non-default optimizer. Using a subset gives indications on which algorithm is the fastest (@fig-timing). Differnt modeling packages are expected to have different computational costs depending on the model definition and the data [@brooks_glmmtmb_nodate]. Options within packages can also influence elapsed times, see e.g., the [lme4 performance tips](https://cran.r-project.org/web/packages/lme4/vignettes/lmerperf.html) vignette. 
+Below, we are comparing three different algorithms, `lme4::glmer.nb()`, `glmmTMB()` and `glmmTMB()` using a non-default optimizer. Using a subset gives indications on which algorithm is the fastest (@fig-timing). Differnt modeling packages are expected to have different computational costs depending on the model definition and the data [@brooks_glmmtmb_nodate]. Options within packages can also influence elapsed times, see e.g., the [lme4 performance tips](https://cran.r-project.org/web/packages/lme4/vignettes/lmerperf.html) vignette. 
 
 
 ```{r}
