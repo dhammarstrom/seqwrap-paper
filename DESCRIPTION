@@ -62,7 +62,8 @@ Imports:
     tidyr,
     tidyselect,
     tidyverse, 
-    usethis
+    usethis,
+    fdrtool
 Remotes:
     github::markgene/maxprobes,
     github::trainome/seqwrap

@@ -44,7 +44,7 @@ editor_options:
 ## Installing seqwrap
 
 
-seqwrap version 0.7.0 is available on [CRAN](https://CRAN.R-project.org/package=seqwrap). To install seqwrap: 
+The latest version of is available from [CRAN](https://CRAN.R-project.org/package=seqwrap). To install seqwrap: 
 
 ```{r}
 #| eval: false
@@ -67,9 +67,9 @@ pak::pkg_install("trainome/seqwrap")
 
 ## Fitting models with seqwrap
 
-The seqwrap package is designed to iterate over multiple targets in a high-dimensional data set to fit a user-defined regression model using a user-selected model fitting function. Each target may represent, e.g., a gene, an exon, a protein, a methylation site, or any other outcome from a high-throughput omics platform. Each target is measured across a set of samples, with a metadata set used to describe study covariates. In the basic case, data and metadata are combined in each iteration to fit the selected model. 
+The seqwrap package is designed to iterate over multiple targets in a high-dimensional data set to fit a user-defined regression model using a user-selected model fitting function. Each target may represent, e.g., a gene, an exon, a protein, a methylation site, or any other outcome from a high-throughput omics platform. Each target is measured across a set of samples, with a metadata set describing study covariates. In the basic case, data and metadata are combined in each iteration to fit the selected model for a specific target. 
 
-Dungan et al. [@dungan2022] evaluated a senolytic treatment (dasatinib and quercetin) in mouse skeletal muscle subjected to mechanical overload through synergist ablation. The study included sham surgery and a vehicle control, allowing analysis of the effect of senolytic treatment and the interaction between mechanical overloading and senolytic treatment. RNA-seq was performed on 20 animals (5 per group). The data are available in the seqwrap package under `dungan_counts`. We will load the data and filter low-expression genes.
+Dungan et al. [@dungan2022] evaluated a senolytic treatment (dasatinib and quercetin) in mouse skeletal muscle subjected to mechanical overload through synergist ablation. The study included sham surgery and a vehicle control, allowing analysis of the effect of senolytic treatment and the interaction between mechanical overloading and senolytic treatment. RNA-seq was performed on 20 animals (5 per group). The data has been downloaded from the gene expression omnibus ([GSE195707](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE195707)) and are made available in the seqwrap package under `dungan_counts`. We will load the data and filter low-expression genes.
 
 
 ```{r}
@@ -154,13 +154,13 @@ n_genes <- nrow(counts)
 
 ```
 
-The data suggests a negative binomial model where the linear predictor can be used to assess the difference between senolytic treatment and control (treat; $\beta_{1g}$), mechanical overloading compared to sham surgery (mov; $\beta_{2g}$), and their interaction ($\beta_{3g}$) for gene *g* (*g* = 1, ..., *m*, here *m* = `r n_genes`) and observation *i* (*i* = 1, ..., *n*, here *n* = 20 rows of the metadata; @eq-m1). We want to control for differences in sequencing depth by including an offset (*s*~i~). We will use the TMM method [@robinson2010] to calculate the effective library size.
+The data suggests a negative binomial model where the linear predictor can be used to assess the difference between senolytic treatment and control (treat; $\beta_{g,1}$), mechanical overloading compared to sham surgery (mov; $\beta_{g,2}$), and their interaction ($\beta_{g,3}$) for gene *g* (*g* = 1, ..., *m*, here *m* = `r n_genes`) and observation *i* (*i* = 1, ..., *n*, here *n* = 20 rows of the metadata; @eq-m1). We want to control for differences in sequencing depth by including an offset (*s*~i~). We will use the TMM method [@robinson2010] to calculate the effective library size.
 
 
 $$
 \begin{align}
-y_{gi} &\sim \operatorname{NB2}(\mu_{gi}, \theta_g) \\
-\operatorname{log}(\mu_{gi}) &= \beta_{0g} + \beta_{1g}\text{treat}_i + \beta_{2g}\text{mov}_i + \beta_{3g}(\text{treat}_i \times  \text{mov}_i) + \operatorname{log}(s_i)
+y_{g,i} &\sim \operatorname{NB2}(\mu_{g,i}, \theta_g) \\
+\operatorname{log}(\mu_{g,i}) &= \beta_{g,0} + \beta_{g,1}\text{treat}_i + \beta_{g,2}\text{mov}_i + \beta_{g,3}(\text{treat}_i \times  \text{mov}_i) + \operatorname{log}(s_i)
 \end{align}
 $$ {#eq-m1}
 
@@ -219,6 +219,9 @@ m1.1_temp <- seqwrap(
 
 ```
 
+
+`seqwrap()` will warn us that we are saving model objects. As we only use 24 targets (i.e., 24 model objects are saved in the environment) in prototyping we can ignore this warning. 
+
 Following iterative fitting using `seqwrap()`, we can summarize the models using `seqwrap_summarise()`, which produces a list of two summaries. Below, we are saving the summaries in an object for later access. Running the `seqwrap_summarise()` function also gives us an overview of the model and successfully summarized targets.
 
 In the `summaries` slot, model parameter values are returned (see @tbl-dungan-sum-temp). These are produced using `broom.mixed::tidy()` which is a general function to retrieve model parameters from many regression model packages in R. 
@@ -266,9 +269,9 @@ m1.1_temp_sum$evaluations |>
 ```
 
 
-### Specifying summary and evaluation function
+### Specifying summary and evaluation functions
 
-We can specify custom functions for evaluating the model object. seqwrap allows for two slots (summaries and evaluations). Each function should take the model object as an argument, and for compatibility with `seqwrap_summarise()`, return a data frame. For our next step, we would like to retrieve the dispersion parameter from each model. We will place this parameter in the evaluation function. We can extract the dispersion parameter on the log scale from the glmmTMB model object. We will construct a function around the extraction and include the observed counts from the data:
+We can specify custom functions for evaluating or summarizing the model object. seqwrap allows for two slots (summaries and evaluations). Each function should take the model object as an argument, and for compatibility with `seqwrap_summarise()`, return a data frame. For our next step, we would like to retrieve the dispersion parameter from each model. We will place this parameter in the evaluation function. We can extract the dispersion parameter on the log scale from the glmmTMB model object. We will construct a function around the extraction and include the observed counts from the data:
 
 
 ```{r}
@@ -298,10 +301,19 @@ The output is, as expected, a data frame with three columns. The dispersion para
 log(sigma(m1.1_temp@models[[1]]))
 ```
 
+For this particular task, seqwrap includes the function `dispersion_evaluation()` which can be used to extract dispersion parameters from a glmmTMB model object containing a negative binomial model. 
+
+```{r}
+seqwrap::dispersion_evaluation(m1.1_temp@models[[1]])
+```
+
+The reason for making your own summary or evaluation function could be, e.g., to extract custom contrasts or collect specific optimizer convergence diagnostics. Using a custom function, we could incorporate functionality from packages like marginaleffects [@arel-bundock_how_2024] or DHARMa [@DHARMa].
 
 ### Running the full model
 
-When we are happy with preliminary performance on a subset of targets, we can initialize `seqwrap()` to iterate over all targets. We are updating the previous model with the new evaluation function directly in `seqwrap()`. Notice that we also remove the `subset` and set `return_models` to `FALSE`. Saving all model objects will be too memory-consuming.
+When we are happy with preliminary performance on a subset of targets, we can initialize `seqwrap()` to iterate over all targets. We are updating the previous model with the evaluation function directly in `seqwrap()`. Notice that we also remove the `subset` and set `return_models` to `FALSE`. Saving all model objects will be too memory-consuming.
+
+`seqwrap()` will give us a message about the expected update frequency of the progress bar and how many targets we are fitting (if `verbose = TRUE`).
 
 We should expect some errors from modelling many thousands of targets. As seen in the note from `seqwrap()`, some models are associated with warnings from the modelling algorithm and/or errors from the evaluation function.
 
@@ -311,10 +323,10 @@ We should expect some errors from modelling many thousands of targets. As seen i
 
 m1.2_results <- seqwrap(
   m1.1,
-  eval_fun = dispersion_fun,
+  eval_fun = dispersion_evaluation,
   cores = parallel::detectCores(), 
   return_models = FALSE,
-  verbose = FALSE
+  verbose = TRUE
 )
 
 
@@ -393,66 +405,29 @@ plot_grid(
 
 Except for the dispersion values, we can easily summarize parameter values by their mean and standard deviation. A more elaborate summary of the dispersion values could include an estimate of the mean (log) dispersion, conditional on the average log counts. As the dispersion prior will be slightly different for each target (based on the observed counts), we will combine priors into target-specific data frames and store them as a list. `seqwrap()` will make target-specific list elements available in each iteration, making it possible to build the prior data frame for `glmmTMB()`.
 
+To make this process more user friendly seqwrap (version > 0.8.1) includes a helper function for putting a list of priors together.
+
 ```{r}
 
-# Summarise parameters from the main output
-param_sum <- m1.2_sum$summaries |> 
-  summarise(.by = term, 
-            m = mean(estimate), 
-            s = sd(estimate)) 
-
-# Fit a model to the log dispersion values
-trend_model <- loess(dispersion ~ log_mu,
-                         data = m1.2_sum$evaluations,
-                         span = 0.7)
-
-
-# Predict dispersion for each gene based on log raw counts
-# and combine into a prior.
-dispersion_prior <- data.frame(gene =  counts[,1],
-                               pred = round(
-                                 predict(trend_model,
-                                         newdata = data.frame(
-                                           log_mu =  log(rowMeans(counts[,-1]))
-                                           )
-                                   ), 3),
-                                 s = round(
-                                   trend_model$s, 3)
-  ) |>
-    mutate(prior = paste0("normal(", pred, ",", s, ")"))
-
-# Combine parameters in a data frame...
-Priors_df <- data.frame(prior = paste0("normal(",
-                                       round(param_sum$m, 2),
-                                       ",",
-                                       round(param_sum$s,2 ), 
-                                       ")"),
-                        class = rep("fixef", 4),
-                        coef = param_sum$term)
-
-
-# ... extract a prediction for the mean dispersion parameter per target
-# and combine with other parameters  
-Priors_list <- list()
-for( j in 1:nrow( counts )) {
-
-
-    df <- bind_rows(Priors_df,
-                    data.frame(
-                      prior =
-                        dispersion_prior[dispersion_prior$gene ==
-                                           counts[j,1],4],
-                      class = "fixef_disp",
-                      coef = "1"
-                    )
-    )
-
-    Priors_list[[j]] <- df
-
-}
+# Summarise parameters from the main output and organizes a 
+# list of target-specific priors
+Prior_list <- seqwrap_priors(m1.2_results, data = counts)
 
 ```
 
+We can inspect the resulting prior by printing the list object 
+
+```{r}
+Prior_list
+```
+
+We can also visually inspect the prior using the plot function.
+
+```{r}
+#| label: fig-prior-dungan
+#| fig-cap: "Empirical Bayes priors estimated from the Dungan data set."
+plot(Prior_list)
+```
 
 Again, we will combine data, metadata, and arguments using `seqwrap_compose()`. We are now also adding the priors to the arguments. The variables used in the priors data frame are made available from the target-specific list referenced in `targetdata = Prior_list`. Using `arguments = alist(... ` avoids evaluation of the list so that the data frame is not evaluated before being used in each iteration. Priors have been built corresponding what is expected by `glmmTMB()` (see [Priors in glmmTMB](https://glmmtmb.github.io/glmmTMB/articles/priors.html)).
 
@@ -463,7 +438,7 @@ m1.3 <- seqwrap_compose(
   modelfun = glmmTMB::glmmTMB,
   data = counts, 
   metadata = metadata, 
-  eval_fun = dispersion_fun, 
+  eval_fun = dispersion_evaluation, 
   arguments =  alist(
     formula = y ~ treatment * surgery + offset(efflibsize), 
     family = glmmTMB::nbinom2,
@@ -471,7 +446,7 @@ m1.3 <- seqwrap_compose(
         prior = prior,
         class = class,
         coef = coef)), 
-  targetdata = Priors_list
+  targetdata = Prior_list
 )
 
 
@@ -487,7 +462,7 @@ summary(m1.3_temp@models[[1]])
 
 ```
 
-Running the prototyping seems to work, we will proceed with the full data set.
+Running the prototyping seems to work, the new set of models contains the prior information. We will proceed with the full data set.
 
 ```{r}
 
@@ -495,7 +470,7 @@ m1.3_results <- seqwrap(
   m1.3, 
   cores = parallel::detectCores(),
   return_models = FALSE, 
-  verbose = FALSE
+  verbose = TRUE
 )
 
 m1.3_sum <- seqwrap_summarise(m1.3_results, verbose = FALSE)
@@ -504,7 +479,7 @@ m1.3_sum <- seqwrap_summarise(m1.3_results, verbose = FALSE)
 
 Regularization increases the number models without convergence issues, in fact all `r n_genes` targets have evaluations and summaries.
 
-The summaries data frame is easily manipulated in subsequent analysis steps to, e.g., adjust p-values and create basic visualizations of the results (@fig-dungan-final-estimates).
+The summary data frame is easily manipulated in subsequent analysis steps to, e.g., adjust p-values and create basic visualizations of the results (@fig-dungan-final-estimates). Here we use the `fdrtool()` function from the fdrtool package to calculate a q-value for thresholding significant effects [@strimmer2008].
 
 ```{r}
 #| fig-cap: "A visualization of results from the regularized model of the Dungan et al. data."
@@ -513,15 +488,23 @@ The summaries data frame is easily manipulated in subsequent analysis steps to, 
 #| warning: false
 #| label: fig-dungan-final-estimates
 
+# Using fdrtool
+library(fdrtool)
 
+# Extract z-scores for a term of interest
+z <- m1.3_sum$summaries |> 
+      filter(term == "treatmentSenolytic:surgeryOverload") |> 
+      pull(statistic)
+
+# Calculate  
+res <- fdrtool(z, statistic = "normal", verbose = FALSE, plot = FALSE)
 
 m1.3_sum$summaries |> 
-
   filter(term == "treatmentSenolytic:surgeryOverload") |> 
-  mutate(fdr = p.adjust(p.value, method = "fdr"), 
-         sig = if_else(fdr < 0.05, "significant", "non-significant"), 
+  mutate(qval = res$qval,
+         sig = if_else(qval < 0.05, "significant", "non-significant"), 
          SYMBOL = if_else(sig == "significant", target, "")) |> 
-  
+      
   ggplot(aes(estimate, -log2(p.value), 
              color = sig)) + 
   geom_point(alpha = 0.4) + 
@@ -533,16 +516,13 @@ m1.3_sum$summaries |>
   theme_classic() + 
   labs(x = "Estimate (log-scaled)", 
        y = "-log<sub>2</sub>(p-value)", 
-       color = "FDR < 0.05", 
+       color = "q-value < 0.05", 
        subtitle = "Overload:Senolytic treatment") + 
   theme(axis.title.y = element_markdown()) 
 
   
   
-
-
 ```
-
 
 The above example shows how to build models with seqwrap. Importantly, we make no claims about the validity of the final model but urge the user to assess assumptions in their data and models as part of a principled workflow.
 
@@ -783,6 +763,9 @@ We used the TMM-method [@robinson2010] for calculating the effective library siz
 
 ### Code chunk not evaluated ###
 
+# Set the number of cores
+CORES <- parallel::detectCores()
+
 
 # Load packages
 library(seqwrap)
@@ -833,19 +816,6 @@ sigma_summary2 <- function(x) {
     conv <- x$fit$convergence[[1]]
   }
 
-
-  ### Simulating scaled resid ###
-  # This creates simulated residuals for test of uniformity and dispersion.
-  # See
-  # https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html
-  # for details.
-  residObj <- DHARMa::simulateResiduals(x, plot = FALSE)
-
-  # Saving tests from DHARMa
-  unif <- DHARMa::testUniformity(residObj, plot = FALSE)
-  disp <- DHARMa::testDispersion(residObj, plot = FALSE)
-
-
   # Saving SD of Obs Level Rand Eff in the Poisson model
 
   tidy_coef <- broom.mixed::tidy(x)
@@ -865,11 +835,7 @@ sigma_summary2 <- function(x) {
                     log_mu = mean(predict(x, type = "link")),
                     convergence = conv,
                     pdHess = x$sdr$pdHess,
-                    aic = AIC(x),
-                    unif.p = unif$p.value,
-                    unif.stat = unif$statistic,
-                    disp.p = disp$p.value,
-                    disp.stat = disp$statistic)
+                    aic = AIC(x))
   return(out)
 
 }
@@ -891,7 +857,7 @@ m1 <- seqwrap_compose(
 
 m1_results <- seqwrap(m1,
                       return_models = FALSE,
-                      cores = parallel::detectCores())
+                      cores = CORES)
 
 ```
 
@@ -922,7 +888,7 @@ m2_results <- seqwrap(
       return_models = FALSE,
       verbose = FALSE,
       subset = 1:16,
-      cores = parallel::detectCores())
+      cores = 1)
 
 ```
 
@@ -934,145 +900,10 @@ We regularized models by adding priors based on non-informed models. The general
 
 ### Code not evaluated ###
 
-## Summarise results from the non-informed model
-m1_sums  <- seqwrap_summarise(m1_results)
-
-
 # Prepare priors for the regularized version
-
-  ## Fitting a model for the mean-dispersion relationship
-
-  # Fit a trend to the dispersion data from m1
-  # save the data in a convenient format. Using the log_mu_raw (average
-  # observed counts) allows for a prior on dispersion also for genes with
-  # unsuccessful fits in model 1. First we gather all dispersion data.
-
-  dispersion_dat <- m1_sums$evaluation |>
-    filter(target %in% targets)
-
-  # Calculate the raw observed counts from the data
-  raw_log_counts <- data.frame(
-    target = as.character( countdat[, 1]),
-    log_mu_raw = log(rowMeans(countdat[,-1]))
-  )
-
-
-  # Adding log raw counts to the dispersion df for modeling.
-  dispersion_dat <- dispersion_dat |>
-    inner_join(raw_log_counts)
-
-
-
-  # The SE of the dispersion estimate is used as weights in the trended model
-    trend_model <- loess(dispersion ~ log_mu_raw,
-                         data = dispersion_dat,
-                         span = 0.7,
-                         weights = 1/(dispersion.se^2))
-
-
-  # Predict dispersion for each gene based on log raw counts
-  # and combine into a prior.
-
-  dispersion_prior <- data.frame(gene =  countdat[,1],
-                                 pred = round(
-                                   predict(trend_model,
-                                           newdata = data.frame(
-                                             log_mu_raw =  log(
-                                               rowMeans(
-                                                 countdat[,-1]))
-                                           )
-                                   ), 3),
-                                 s = round(
-                                   trend_model$s, 3)
-  ) |>
-    mutate(prior = paste0("normal(", pred, ",", s, ")"))
-
-
-
-  # Gather all distributions of estimates that can be used as prior information
-  # in subsequent model.
-
-
-  ## Preliminary plot ##
-  #  ms1_sum$summaries |>
-  #  filter(target %in% targets) |>
-  #  select(target, term, estimate) |>
-  #  ggplot(aes(estimate)) + geom_density() +
-  #  facet_wrap(~ term, scales = "free")
-
-  estimate_distributions <- m1_sums$summaries |>
-    filter(target %in% targets) |>
-    select(target, term, estimate) |>
-
-    summarise(.by = term,
-              m = mean(estimate),
-              s = sd(estimate)) |>
-    filter(!term %in%  c("(Intercept)", "sd__(Intercept)"))
-
-  # Extract the random effects distribution to fit a gamma distribution
-  random_sd_estimate <- m1_sums$summaries |>
-    filter(target %in% targets,
-           term == "sd__(Intercept)") |>
-    select(target, term, estimate) |>
-    pull(estimate)
-
-  # The gamma distribution is parameterized using a shape and a rate
-  # parameter. It looks like this prior will lead to a push towards 0,
-  # we are adding a constant to push away from zero...
-  mean_sd <- mean(random_sd_estimate)
-  var_sd <- var(random_sd_estimate)
-  shape_param <- 2 # mean_sd^2 / var_sd
-
-
-
-
-
-  # Here we prepare priors for the fixed effects, in this version all fixed
-  # effects, except the intercept, will have regularizing priors 
-  # corresponding to the distributions of effects seen in the non-informed
-  # models.
-  Priors_df <- bind_rows(
-    data.frame(prior = paste0("normal(",
-                              round(estimate_distributions$m,2 ), 
-                              ", ",
-                              ,round(estimate_distributions$s,2 ), ")"),
-               class = rep("fixef", 5),
-               coef = estimate_distributions$term),
-    data.frame(prior = paste0(
-      "gamma(",
-      round(mean_sd ,2),
-      ",",
-      2,
-      ")"),
-      class = "ranef",
-      coef = "id")
-  )
-
-  # We want to use the mean-dispersion relationship to add a prior for the
-  # dispersion parameter. This means that we need a target specific prior
-
-  Priors_list <- list()
-  for( j in 1:nrow( countdat)) {
-
-
-    df <- bind_rows(Priors_df,
-                    data.frame(
-                      prior =
-                        dispersion_prior[dispersion_prior$gene ==
-                                           countdat[j,1],4],
-                      class = "fixef_disp",
-                      coef = "1"
-                    )
-    )
-
-    Priors_list[[j]] <- df
-
-
-
-  }
+Priors_list <- seqwrap_priors(m1_results, data = countdat)
 
 # Fit regularized model 
-  
   m1.reg <- seqwrap_compose(
     data =  countdat,
     metadata =  metadat,
@@ -1093,14 +924,564 @@ m1_sums  <- seqwrap_summarise(m1_results)
     return_models = FALSE,
     verbose = FALSE,
     #  subset = 1:50, # for prototyping
-    cores = parallel::detectCores())
+    cores = CORES)
 
 
 ```
 
 
+## Analyzing DNA methylation data
 
-## Simulation results
+The following outlines a partial reanalysis of data on CpG methylation status in human skeletal muscle in response to resistance exercise training, followed by detraining and subsequent retraining [@seaborne2018;@seaborne2018b]. Most of the relevant code is explicitly shown here. In contrast, the version of this case study included in the manuscript has been stripped of some details.
+
+
+### Packages, raw data and preprocessing
+
+```{r}
+#| label: dependencies
+#| eval: true
+#| 
+
+# Packages
+
+library(GEOquery)      # For accessing the raw data
+library(minfi)         # For pre-processing of raw data
+library(dplyr)
+library(tidyr)
+library(gt)
+library(ggplot2)
+library(stringr)
+library(maxprobes)     # For filtering cross-reactive probes 
+library(seqwrap)
+```
+
+
+```{r}
+#| echo: false
+# Load color scale 
+source(here::here("analysis/figures/figure-opts.R"))
+```
+
+Raw data are downloaded from the [Gene Expression Omnibus](https://www.ncbi.nlm.nih.gov/geo/) using the accession number [GSE114763](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE114763) as IDAT files. See the file `analysis/methylation-case-study-dataprep.R` (available in the [project repository](https://github.com/trainome/seqwrappaper)) for details on downloading and preparation of the data.  
+
+```{r}
+#| label: paths
+#| eval: true
+#| echo: false
+
+# Prepare data download. 
+# Note for use in the present repo: 
+# raw_data and derived data are gitignored so safe for 
+# large files. If code-re-use, check the download folder before committing 
+# changes to git. 
+
+# The GEO ID
+gse_id   <- "GSE114763"
+
+# Set download directories
+raw_dir  <- here::here("analysis/data/raw_data", gse_id)
+idat_dir <- file.path(raw_dir, "idat")
+der_dir  <- here::here("analysis/data/derived_data")
+
+dir.create(idat_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(der_dir,  recursive = TRUE, showWarnings = FALSE)
+
+# The metadata (pheno_raw) and the raw data IDAT files are cached after 
+# downloading once. 
+
+# A function for retrying connection to GEO for downloading large data.
+# This was created after issues with downloading the large zipped archive
+# from GEO. 
+retry_url <- function(expr, tries = 5, pause = 5) {
+  call <- substitute(expr)          # re-evaluated on each attempt
+  env  <- parent.frame()
+  for (i in seq_len(tries)) {
+    out <- try(eval(call, env), silent = TRUE)
+    if (!inherits(out, "try-error")) return(out)
+    if (i < tries) Sys.sleep(pause * i)
+  }
+  stop("failed after ", tries, " attempts: ",
+       conditionMessage(attr(out, "condition")))
+}
+
+# Series-level metadata
+#
+# The metadata contains file names and titles include 
+# time-points and participant information. 
+pheno_file <- file.path(raw_dir, "pheno_raw.rds")
+
+if (!file.exists(pheno_file)) {
+  soft_url <- paste0("https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+                     "?acc=", gse_id, "&targ=gsm&form=text&view=brief")
+
+  soft <- retry_url({
+    res <- curl::curl_fetch_memory(soft_url)
+    if (res$status_code != 200) stop("HTTP ", res$status_code)
+    strsplit(rawToChar(res$content), "\r?\n")[[1]]
+  })
+
+  # one record per sample; "!Sample_<key> = <value>" lines within each
+  kv <- tibble::tibble(record = cumsum(startsWith(soft, "^SAMPLE")),
+                       line   = soft) |>
+    dplyr::filter(startsWith(line, "!")) |>
+    tidyr::separate(line, into = c("key", "value"), sep = " = ",
+                    extra = "merge") |>
+    dplyr::mutate(key = stringr::str_remove(key, "^!Sample_"))
+
+  # characteristics are themselves "<key>: <value>" pairs
+  characteristics <- kv |>
+    dplyr::filter(key == "characteristics_ch1") |>
+    tidyr::separate(value, into = c("key", "value"), sep = ": ",
+                    extra = "merge") |>
+    dplyr::filter(key %in% c("gender", "age", "weight", "height")) 
+
+  # Cleaning the metadata for downstream processing. 
+  pheno_raw <- kv |>
+    dplyr::filter(key %in% c("geo_accession", "title")) |>
+    dplyr::bind_rows(characteristics) |>
+    tidyr::pivot_wider(id_cols = record, names_from = key,
+                       values_from = value) |>
+    dplyr::select(-record) |> 
+
+        mutate(title_sep = title) |> 
+        separate(title_sep, into = c("seq_sample_id", "timeid"), sep = ":") |>
+        mutate(timeid = gsub(" Muscle_", "", timeid)) |> 
+        mutate(timeid = gsub("Participant_", "", timeid)) |> 
+        mutate(timeid = gsub("7wk_", "7wk", timeid)) |> 
+        
+         separate(timeid, into = c("time", "participant", "replicate"), sep = "_") |> 
+      # Making time-point more obvious
+        mutate(time = case_when(
+              time == "Baseline" ~ "1_baseline", 
+              time == "Acute" ~ "2_acute", 
+              time == "7wkLoading" ~ "3_loading", 
+              time == "7wkUnloading"  ~ "4_unloading", 
+              time == "7wkRe-oading" ~ "5_reloading"
+        )) |> 
+        # Fixing meta-data details
+        mutate(weight = gsub(" kg", "", weight), 
+               height = gsub("cm", "", height), 
+               weight = as.numeric(weight), 
+               height = as.numeric(height), 
+               age = as.numeric(age)) |> 
+        # Fix a misprinted participant id
+        mutate(participant = gsub("P006", "006", participant)) 
+  
+
+  saveRDS(pheno_raw, pheno_file)
+}
+
+pheno_raw <- readRDS(pheno_file)
+
+# Double check 40 expected samples
+stopifnot(nrow(pheno_raw) == 40)
+
+# Download and extract raw IDAT files.
+# IDATs are distributed gzipped; minfi reads decompressed files
+tar_file <- file.path(raw_dir, paste0(gse_id, "_RAW.tar"))
+
+if (!file.exists(tar_file)) {
+  # ~722 MB; increase the timeout for slow connections
+  options(timeout = 60 * 60)
+  retry_url(GEOquery::getGEOSuppFiles(gse_id, baseDir = dirname(raw_dir),
+                                      makeDirectory = TRUE))
+}
+
+if (length(list.files(idat_dir, pattern = "\\.idat$")) == 0) {
+  utils::untar(tar_file, exdir = idat_dir)
+
+  # Unzip idat files
+  gz <- list.files(idat_dir, pattern = "\\.idat\\.gz$", full.names = TRUE)
+  invisible(lapply(gz, R.utils::gunzip, overwrite = TRUE, remove = TRUE))
+}
+
+```
+
+The data downloading process gives us a metadata set describing the participants (@tbl-meta-samples).
+
+```{r}
+#| label: tbl-meta-samples
+#| tbl-cap: "Sample metadata retreived from GEO ([GSE114763](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE114763)) corresponding to @seaborne2018b."
+#| echo: false
+
+
+pheno_raw |> 
+      summarise(.by = participant, 
+                weight = mean(weight), 
+                height = mean(height), 
+                age = mean(age)) |> 
+      mutate(participant = gsub("00", "", participant)) |> 
+      select(participant, age, height, weight) |> 
+      gt() |> 
+      cols_label(participant = "Participant", 
+                 age = "Age (years)", 
+                 weight = "Weight (kg)", 
+                 height = "Height (cm)")
+      
+      
+```
+
+Checking available IDAT files gives us an overview over the available data over the time-points of the study (@tbl-metadata-count). 
+
+```{r}
+#| label: tbl-metadata-count
+#| eval: true
+#| tbl-cap: "Samples per time-point and participant."
+
+
+idat_stems <- list.files(idat_dir, pattern = "_Grn\\.idat$") |>
+  stringr::str_remove("_Grn\\.idat$")
+
+array_info <- tibble::tibble(stem = idat_stems) |>
+  tidyr::separate(stem, into = c("geo_accession", "slide", "array"),
+                  sep = "_", remove = FALSE) |>
+  dplyr::mutate(Basename = file.path(idat_dir, stem))
+
+metadata <- pheno_raw |>
+      # Removing outlier sample, see "Quality Control of DNA Methylation Probes"
+      # in @seaborne2018b
+      filter(!grepl("SkM_Epi_Mem_1:", title), 
+             !grepl("SkM_Epi_Mem_39:", title)) |> 
+      
+  tibble::as_tibble() |>
+  dplyr::select(geo_accession,
+                title,
+                participant,
+                gender,
+                age, 
+                time) |>
+  dplyr::mutate(
+    label = stringr::str_remove(title, "^SkM_Epi_Mem_\\d+:\\s*")) |>
+  dplyr::left_join(array_info, by = "geo_accession")
+
+stopifnot(!anyNA(metadata$time), !anyNA(metadata$participant))
+
+# 38 arrays: 8 participants x 5 time points with missing values for on 
+# participant.
+
+metadata |> 
+      summarise(.by = c(time, participant), 
+                n = n()) |> 
+      pivot_wider(names_from = time, values_from = n) |> 
+      select(Participant = participant, 
+             Baseline = `1_baseline`, 
+             Acute = `2_acute`, 
+             Loading = `3_loading`, 
+             Unloading = `4_unloading`, 
+             Reloading = `5_reloading`) |> 
+      gt() |> 
+      tab_spanner(label = "Sample time-points", columns = "Baseline":"Reloading")
+      
+
+
+
+```
+
+We will use the minfi package [@aryee2014] to read the raw data and perform quality control, filtering and normalization. As a first step, array-level filtering is done using detection p-values where methylated and unmethylated positions are compared to negative control positions. This comparison produces a p-value used to identify problematic genomic positions. As shown below (@fig-array-qc), array-level aggregates show mean values < 0.01. 
+
+In the code below, IDAT file names (e.g., `r idat_stems[1]`) are combined with the file tree in `Basename`. `minfi::read.metharray()` iterates over all file names in this vector and imports the data. 
+
+
+```{r}
+#| label: fig-array-qc
+#| fig-cap: "Array-level quality control. Mean detection p-values and fraction of failed genomic positions per array subdivided by time-point."
+#| eval: true
+#| echo: true
+
+rgset <- minfi::read.metharray(metadata$Basename, 
+                               extended = TRUE, 
+                               force = TRUE)
+
+# Check that orders correspond
+stopifnot(identical(colnames(rgset), basename(metadata$Basename)))
+
+colnames(rgset) <- metadata$geo_accession
+
+# Perform detection check  
+det_p <- minfi::detectionP(rgset)
+
+qc <- tibble::tibble(
+  geo_accession = colnames(det_p),
+  mean_det_p    = colMeans(det_p),
+  frac_failed   = colMeans(det_p > 0.01))
+
+qc |> 
+      inner_join(pheno_raw |> 
+                       select(geo_accession, time)) |> 
+      ggplot(aes(mean_det_p, frac_failed, color = time)) + 
+      geom_point() +
+      labs(x = "Array-level mean detection p-value", 
+           y = "Fraction of failed genomic positions (p > 0.01)", 
+           color = "Time-point")
+```
+
+Next, we filter the data using the detection p-value criteria.
+
+```{r}
+# All samples pass quality control
+keep_samples <- qc$geo_accession[qc$mean_det_p < 0.01]
+# length(keep_samples)
+rgset    <- rgset[, keep_samples]
+det_p    <- det_p[, keep_samples]
+metadata <- metadata |> dplyr::filter(geo_accession %in% keep_samples)
+```
+
+### Normalization and probe filtering 
+
+Between-array quantile normalization, as implemented by `minfi::preprocessQuantile()` [@aryee2014], is used. An assumption about the data is the we do not expect genome-wide differences in methylation patterns between time-points. Probes are then removed if they (1) fail detection in any retained sample, (2) overlap common SNPs at the target CpG or single-base extension site, (3) appear on published lists of cross-reactive EPIC probes (using the [`maxprobes`](https://github.com/markgene/maxprobes/) package), or (iv) map to the sex chromosomes (all male cohort). 
+
+The same pipeline is run by `analysis/R/methylation-case-study-dataprep.R`, which writes the result to `analysis/data/derived_data/seaborne-gset-quantile.RDS`. We use the resulting "gset" in the permutation study and for the full model run.
+
+```{r}
+#| label: normalise-filter
+#| eval: true
+
+# Between-array quantile normalization.
+#
+# NOTE THE RETURN CLASS. preprocessFunnorm(ratioConvert = FALSE) returned a
+# GenomicMethylSet, which still carries the methylated and unmethylated
+# intensities, so beta could be asked for as getBeta(gset, offset = 100).
+# preprocessQuantile() returns a GenomicRatioSet built as
+# GenomicRatioSet(Beta = NULL, M = log2(Meth / Unmeth)): there are no
+# intensities in it and no offset anywhere, and getBeta() on such an object
+# derives beta from M by the inverse logit and ignores `offset`.
+# Everything downstream therefore derives beta from M explicitly.
+gset <- minfi::preprocessQuantile(
+  rgset,
+  fixOutliers = TRUE,
+  quantileNormalize = TRUE,
+  stratified = TRUE,
+  # All samples are male and the sex chromosomes are dropped below, so the sex
+  # prediction this would otherwise run has nothing to decide.
+  sex = rep("M", ncol(rgset))
+)
+
+stopifnot(is(gset, "GenomicRatioSet"))
+
+# Initial number of probes
+nprobes_init <- dim(gset)[1]
+
+## (i) detection
+det_p  <- det_p[match(minfi::featureNames(gset), rownames(det_p)), ]
+keep   <- rowSums(det_p < 0.01) == ncol(gset)
+gset   <- gset[keep, ]
+
+# Number of probes after filtering
+nprobes_detectionfilter <- dim(gset)[1]
+
+## (ii) SNP-affected probes 
+gset <- minfi::dropLociWithSnps(gset, snps = c("SBE", "CpG"), maf = 0)
+
+nprobes_snp <- dim(gset)[1]
+
+## (iii) cross-reactive probes 
+gset <- maxprobes::dropXreactiveLoci(gset)
+
+nprobes_cross <- dim(gset)[1]
+
+## (iv) sex chromosomes 
+anno <- minfi::getAnnotation(gset)
+gset <- gset[!anno$chr %in% c("chrX", "chrY"), ]
+
+nprobes_final <- dim(gset)[1]
+
+# The check the beta arm depends on. M is what a GenomicRatioSet stores; beta
+# is the inverse logit of it, which is inside the OPEN interval (0, 1) for
+# every finite M. This is what replaces the guarantee the Illumina offset used
+# to provide, and it is asserted rather than assumed: a non-finite M would come
+# from an intensity of exactly zero surviving fixOutliers, and would reach the
+# beta family as a response of exactly 0 or 1, which it cannot take.
+m_check    <- minfi::getM(gset)
+beta_check <- 2^m_check / (1 + 2^m_check)
+
+stopifnot(all(is.finite(m_check)), all(beta_check > 0 & beta_check < 1))
+
+# The observed distance from the boundary, reported below.
+beta_min <- min(beta_check)
+beta_max <- max(beta_check)
+m_range  <- range(m_check)
+
+rm(m_check, beta_check)
+
+```
+
+
+`r nprobes_init` normalized probes were filtered based on detection which retained `r nprobes_detectionfilter`, after SNP-overlap (n = `r nprobes_snp`), cross-reactivity (n = `r nprobes_cross`) and sex-chromosome mapping filtering, n = `r nprobes_final` remained in the data set. 
+
+### Calculation of methylation quantities
+
+An Illumina array detecting methylation values produces arbitrary signals for the unmethylated (U) and methylated (M) portion of the i^th^ genomic position. Converting these two values to a methylation score can be done using the calculation of a &beta; value.
+
+$$
+\beta_i = \frac{M_i}{M_i+U_i}
+$$
+A bias constant c, is added to the denominator to avoid large variations in the &beta; score when probe intensities are low [@bibikova2006]. A common choice is $c = 100$ [@bibikova2006], which is also the default in the `minfi` package when `type = "illumina"`. However, the successful choice of c is noted to depend on the pre-processing of the data (see `?minfi::getBeta`). Since we are using the `minfi::preprocessQuantile()` function we get the M values directly ($M = \log_2(\text{Meth}/\text{Unmeth})$) without the involvement of the c constant. The &beta; values are instead derived from the normalized M values using the inverse logit: 
+
+$$
+\beta_i = \frac{2^{M_i}}{1 + 2^{M_i}}
+$$
+Here &beta; is restricted to the interval $(0, 1)$ and although this is an intuitive metric for understanding the methylation status at a specific genomic site (e.g., as a percentage methylation), it is an inconvenient quantity for a statistical model that expects normally distributed errors [@laird2010; @du2010]. Indeed, when applying a Gaussian model to identify differentially methylated genomic sites, a logit transformation of the &beta;-values (M values) results in more favorable diagnostics [@du2010].
+
+The observed M-values in the data set span `r sprintf("%.2f", m_range[1])` to `r sprintf("%.2f", m_range[2])`, giving &beta; values between `r sprintf("%.3g", beta_min)` and `r sprintf("%.6f", beta_max)`, i.e. `r sprintf("%.3g", beta_min)` and `r sprintf("%.3g", 1 - beta_max)` away from the two boundaries making it possible to use beta regression to model &beta; values. We can move back and forth between M and &beta; values, to get M from &beta; we use:
+
+$$
+M = \log_2 \left( \frac{\beta}{1-\beta} \right)
+$$
+
+The relationship between the two transformations can be visualized as shown in @fig-beta-mval.
+
+```{r}
+#| label: fig-beta-mval
+#| fig-cap: "The logit transform of &beta; values gives M-values."
+#| echo: false
+
+
+beta <- seq(from = 0.001, to = 0.999, by = 0.001)
+Mval <- log2(beta/(1-beta))
+
+data.frame(Mval, beta) |> 
+      ggplot(aes(Mval, beta)) + geom_line() + 
+      theme_classic() + 
+      labs(x = "M-values", y = "&beta;-values") + 
+      theme(axis.title.y = ggtext::element_markdown())
+
+```
+
+In conclusions, two potential routes for modeling methylation values exists. We can model M values as having normally distributed errors (Gaussian model), or we could model the &beta; values using beta regression. Next we evaluate these model choices. 
+
+### Inferential error rates across models 
+
+We will compare the models using type I error rate and power determined from permutation of within-participant relabeled data. This relabeling establishes a null distribution for statistical tests performed using the within-participant design. The design keeps the within-participant correlation. Our approach is similar to what was described in [@gadbury2008].
+
+We will perform the experiment on permuted data from a subset of genomic sites distributed across different strata of &beta; values. 
+
+A fixed number of sites is sampled from each &beta;-value stratum. Within every permutation, a random subset of those sites receives a known effect (adding a known average effect) while the remainder are left untouched (null-sites). Sites without an effect estimate the type I error rate, sites with an added effect are used to estimate power.
+
+We will use the M-value scale to add the effect to permuted data with effect assignment redrawn in every permutation. The &beta;-values are derived from the manipulated M-values. A shift of &delta; M units is exactly the fixed-effect parameter of the Gaussian model and proportionally to &delta;&times;log(2) for the linear-predictor shift of the &beta; model with the logit link. This means that no model is favored by the parameterization. Our approach differs here from @gadbury2008. We fix the effect sizes while @gadbury2008 uses empirical effect sizes from the data. Our simplified approach enables comparisons between model fitting procedures at known effect sizes and signs across strata of &beta; values.
+
+In the code chunk below, a single site is used to show the workflow. M values are taken from the `gset` object and &beta; values are derived from them. We are using a randomly selected row of the M value matrix and join the values with the meta data. Within each participant, time is re-sampled to create a permuted time factor. Using the permuted time factor, an average effect (&delta; = 0.3) is added to all observations belonging to the permuted time-point `3_loading`. Data are back-transformed to the &beta; scale and both model types are fitted.
+
+We will use a set of different inferential alternatives to establish the most appropriate model and test for our data set. In small samples, linear mixed model parameter p-values from the Wald test are anti-conservative [@luke2017]. When the restricted maximum likelihood (REML) is used in place of maximum likelihood and small sample size-corrections are used (Kenward-Roger or Satterthwaite approximations of degrees of freedom) the type I error rates are controlled at the nominal level [@luke2017]. However, for the generalized linear mixed model (GLMM) with link functions, such as beta regression, the restricted maximum likelihood is not clearly defined [@maestrini2024]. When comparing different REML implementations, @maestrini2024 found that GLMM fitted with REML leads to a reduction in small sample bias and that the use of REML probably should be more widely adopted. The choice of algorithm can be made based on software availability [@maestrini2024]. REML is implemented also for GLMM in the glmmTMB package with the option `REML=TRUE`. For Gaussian models, the results from `glmmTMB` replicates the results of `lme4::lmer`. However, the documentation also says that performance of REML in non-Gaussian models should be verified by simulations (see `?glmmTMB::glmmTMB`).
+
+In addition to REML for mitigation of small sample bias, the Satterthwaite correction is widely adopted in Gaussian mixed-effects models to approximate the denominator degrees of freedom for t-tests of parameter estimates [@kuznetsova2017]. Similarly to REML estimation for GLMM's, the Satterthwaite approximation is indicated for use "at your own risk" (see `?glmmTMB::dof_satt`).
+
+```{r}
+# Illustrating data preparation and model settings for a set of 
+# candidate models for the methylation data set.
+
+# Prepare data.
+#
+# We first load M values and derive beta derived from them.
+m_vals <- minfi::getM(gset)
+beta_vals <- 2^m_vals / (1 + 2^m_vals)
+
+# Setting the seed for site selection and time permutation
+set.seed(1)
+
+# Selecting a random site for testing
+y <- data.frame(y = m_vals[sample(1:nrow(m_vals), 1),]) |> 
+      tibble::rownames_to_column(var = "geo_accession" ) 
+
+# Organizing the data into a format suitable for single model 
+# fit. 
+dat <- metadata |> 
+      dplyr::select(geo_accession, participant, time) |> 
+      inner_join(y) |>
+      # Permutation of time within participant
+      group_by(participant) |> 
+      mutate(time_permute = sample(time, replace = FALSE)) |> 
+      ungroup() |> 
+      mutate(msim = if_else(time_permute == "3_loading", 
+             y + 0.3, y), 
+             betasim = plogis(msim * log(2))) 
+
+
+# A general purpose summary function for ML/REML fits.
+#
+# This function is similar to the `summary_fun` in
+# analysis/R/methylation-error-permutation.R). 
+temp_summary_fun <- function(m) {
+
+      # Wald p-value (restricted to paremeter 3_loading)
+      wald_p <- coef(summary(m))$cond["time_permute3_loading", "Pr(>|z|)"]
+      # Wald p-value Satterthwaite
+      wald_p_satter <- coef(summary(m, ddf = "satterthwaite"))$cond["time_permute3_loading", "Pr(>|t|)"]
+
+      data.frame(wald_p = wald_p,
+                 wald_p_satter = wald_p_satter)
+
+}
+
+
+# Storing fits in a list 
+fits <- list()
+
+# Maximum likelihood M-values
+fits[[1]] <- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
+                          data = dat)
+
+
+# Maximum likelihood beta regression
+fits[[2]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
+                          data = dat, 
+                          family = glmmTMB::beta_family)
+
+# REML M-values
+fits[[3]]<- glmmTMB::glmmTMB(msim ~ time_permute + (1|participant), 
+                           REML = TRUE,
+                          data = dat)
+
+# REML beta regression
+fits[[4]] <- glmmTMB::glmmTMB(betasim ~ time_permute + (1|participant), 
+                          data = dat, 
+                          REML = TRUE,
+                          family = glmmTMB::beta_family)
+
+
+
+out <- lapply(fits,temp_summary_fun) |> 
+      bind_rows() |> 
+      mutate(model = c("M-values",
+                       "B-values",
+                       "M-values",
+                       "B-values"), 
+             estimator = c("ML", "ML", "REML", "REML"))
+```
+
+
+```{r}
+#| tbl-cap: "P-values from a set of model specifications for a specific CpG site"
+#| label: tbl-prel-results-meth
+#| echo: false
+
+out |>
+            dplyr::select(model,estimator, wald_p, wald_p_satter) |>
+      gt() |>
+
+      gt::cols_label(wald_p = "Wald z/t-test",
+                     wald_p_satter = md("Wald t-test w.<br>Satterthwaite DDF"), 
+                     estimator = "Estimator", 
+                     model = "Model") 
+```
+
+
+
+
+```{r}
+# Illustrating the 
+es_mmod <- coef(summary(fits[[3]]))$cond["time_permute3_loading","Estimate"]
+es_betamod<- coef(summary(fits[[4]]))$cond["time_permute3_loading","Estimate"]
+
+es_betamod <- es_betamod / log(2)
+
+```
+
+The different model specifications produces different p-values (@tbl-prel-results-meth), although, we will need the full permutation experiment to determine any systematic differences. The transformation of the estimates follow the same logic as the transformation of the raw data. The estimated effects (`r round(es_mmod,2)` and `r round(es_betamod,2)`) for the model on M-values and &beta; values respectively are comparable but will differ due to compression in the &beta; values model.
+
+The source code for the full permutation experiment can be found in the script `analysis/R/methylation-error-permutation.R` in the [project repository](https://github.com/trainome/seqwrappaper).
+
+
+## Simulation results from the RNA-seq analysis
 
 Below follows supplementary results from the simulation study presented in the main text. 
 

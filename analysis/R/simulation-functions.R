@@ -118,26 +118,41 @@ sigma_summary2 <- function(x) {
 }
 
 
-#' Download simulations
+#' Download simulations and methylation case-study results
 #'
-#' The simulations in this project are computationally intensive. Simulation
-#' results are available at
+#' The simulations and the methylation case study in this project are
+#' computationally intensive. Their results are available at
 #' Chidimma Echebiri; Ellefsen, Stian; Ahmad, Rafi; Hammarstrom, Daniel,
 #' 2026, "Simulated data sets for: seqwrap: an R package for flexible iterative
 #'  fitting of high-dimensional data", https://doi.org/10.18710/I7U71O,
-#'  DataverseNO, V1.
-#'  This function downloads simulation results from dataverse.
+#'  DataverseNO.
+#'  This function downloads all files in the data set from dataverse.
 #'
+#' The data set holds two kinds of files, told apart by their directory label
+#' on Dataverse:
+#'
+#' * Simulation results (`estimates/`, `estimates2/`, `evaluations/`,
+#'   `evaluations2/`, `simdata/`, `simdata2/`) and the data set README go to
+#'   `dest_dir`, i.e. `analysis/data/raw_data/`.
+#' * Methylation case-study results carry the prefix `derived_data/`
+#'   (`derived_data/permutation_v4/`, `derived_data/full_v3/`,
+#'   `derived_data/full_v2/`, `derived_data/timing_v1/` and the two array
+#'   files in `derived_data/` itself). The prefix is stripped and the files go
+#'   to `derived_dir`, i.e. `analysis/data/derived_data/`, which is where the
+#'   scripts in `analysis/R/` would have written them.
 #'
 #' @param doi The DOI in our data set.
-#' @param dest_dir The destination folder. Should be placed in raw data
-#' (added to .gitignore)
+#' @param dest_dir The destination folder for simulation results. Should be
+#' placed in raw data (added to .gitignore)
+#' @param derived_dir The destination folder for files whose directory label
+#' starts with `derived_data/`.
 #' @param server For reuse of the function, if other dataverse servers
 #' are to be used.
 #' @param overwrite If we need to overwrite individual files.
 download_dataverse <- function(
   doi = "doi:10.18710/I7U71O",
   dest_dir = here::here("analysis/data/raw_data"),
+  derived_dir = here::here("analysis/data/derived_data"),
   server = "dataverse.no",
   overwrite = FALSE
 ) {
@@ -167,7 +182,18 @@ download_dataverse <- function(
 
   purrr::walk(files, function(f) {
     dir <- if (is.null(f$directoryLabel)) "" else f$directoryLabel
-    out_dir <- file.path(dest_dir, dir)
+
+    # Route by directory label: the methylation case-study files are labelled
+    # derived_data/... on Dataverse and belong under analysis/data/derived_data
+    # (the prefix is stripped); everything else is a simulation file and goes
+    # to dest_dir as before.
+    if (grepl("^derived_data(/|$)", dir)) {
+      root <- derived_dir
+      dir <- sub("^derived_data/?", "", dir)
+    } else {
+      root <- dest_dir
+    }
+    out_dir <- if (nzchar(dir)) file.path(root, dir) else root
     dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
     dest <- file.path(out_dir, f$dataFile$filename)

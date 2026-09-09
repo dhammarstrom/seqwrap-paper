@@ -70,31 +70,44 @@ The **analysis** directory contains:
   (`seqwrappaper::pillon_counts`).
 - `/analysis/data/raw_data/`: Data derived from simulation experiments
   are stored here either after running simulations locally, or after
-  downloading simulated data sets from Dataverse.no. See below for
-  details.
+  downloading simulated data sets from Dataverse.no. The raw methylation
+  arrays (GEO accession GSE114763) are also downloaded here by the
+  supplement and the data-preparation script. See below for details.
 - `/analysis/data/derived_data/`: Intermediate analyses and cache files
-  used for reporting.
-- `/analysis/figures`: Scripts for producing figures 2-4 and reproduce
+  used for reporting. This includes the results of the methylation case
+  study (Figure 5), which are either reproduced locally or downloaded
+  from Dataverse.no. See below for details.
+- `/analysis/figures`: Scripts for producing figures 2-5 and reproduce
   some of the results presented in the main text.
 
-### Downloading simulated data and estimates
+### Downloading simulated data, estimates and methylation results
 
 The analyses presented in the paper use data generated through
-simulations and the analyses of those data. The results can be
-reproduced using by running the `make-docs.R` script with
-`make_sim <- TRUE`, however, the runtime for this process is \> 24 h on
-a personal computer. The data sets are available for download from
-DataverseNO: https://doi.org/10.18710/I7U71O. The function
-`download_dataverse()` downloads this data to the
-`analysis/data/raw_data` folder.
+simulations and the analyses of those data, and a methylation case study
+fitted on 770 441 CpG sites. Both can be reproduced by running the
+`make-docs.R` script with `make_sim <- TRUE` and `make_meth <- TRUE`
+respectively, however, the runtime is \> 24 h for the simulations and
+about two days on 16 cores for the methylation case study. The results
+are available for download from DataverseNO:
+https://doi.org/10.18710/I7U71O. The function `download_dataverse()`
+downloads the whole data set and routes each file by its directory label
+on Dataverse: simulation results go to the `analysis/data/raw_data`
+folder, and files labelled `derived_data/...` go to the
+`analysis/data/derived_data` folder. `make-docs.R` calls
+`download_dataverse()` unconditionally; files that already exist on disk
+are skipped.
 
 The downloadable data is identical to that produced by the `make-docs.R`
-script. Downloading the data enables direct reproduction of figures and
-the manuscript.
+script, with two exceptions that are only available from Dataverse: the
+timing experiment behind Figure 5 F-G (`derived_data/timing_v1/`) and
+the timing of the superseded four-arm full run
+(`derived_data/full_v2/timing.RDS`), which the manuscript quotes.
+Downloading the data enables direct reproduction of figures and the
+manuscript.
 
-`download_dataverse()` places a total of 260 files (+ a README file) in
-the `raw_data` folder. Once downloaded, the structure of the `raw_data`
-folder should be:
+`download_dataverse()` places a total of 260 simulation files (+ a
+README file) in the `raw_data` folder. Once downloaded, the structure of
+the `raw_data` folder should be:
 
     -- raw_data/
        |-- estimates/
@@ -139,6 +152,43 @@ folder should be:
                |-- dataset_1.RDS
                |-- …
                |-- dataset_10.RDS
+
+The methylation case-study files are labelled `derived_data/...` on
+Dataverse and are placed in the `derived_data` folder, where the scripts
+in `analysis/R/` would otherwise have written them. After downloading,
+the `derived_data` folder should contain (in addition to the model
+estimates and caches written by `make-docs.R`):
+
+    -- derived_data/
+       |-- seaborne-gset-quantile.RDS   quantile normalized, probe-filtered arrays
+       |-- seaborne-metadata.RDS        sample metadata for the arrays
+       |-- permutation_v4/             Type I error and power (Figure 5 A-E)
+       |   |-- perm_0001.RDS
+       |   |-- …
+       |   |-- perm_0200.RDS
+       |-- full_v3/                    REML arms on all sites (Figure 5, main text)
+       |   |-- beta_reml.RDS
+       |   |-- beta_reml-meta.RDS
+       |   |-- m_reml.RDS
+       |   |-- m_reml-meta.RDS
+       |   |-- timing.RDS
+       |-- full_v2/                    timing of the superseded four-arm run
+       |   |-- timing.RDS
+       |-- timing_v1/                  timing experiment (Figure 5 F-G)
+           |-- cell-*.RDS (152 files)
+           |-- design.RDS
+           |-- draws.RDS
+           |-- timing-cells.RDS
+           |-- timing-scaling.RDS
+           |-- warmup.RDS
+
+The array files were produced by
+`analysis/R/methylation-case-study-dataprep.R` from GEO accession
+GSE114763, `permutation_v4/` by `analysis/R/methylation-error-permutation.R`,
+`full_v3/` by `analysis/R/methylation-case-full.R`, and `timing_v1/` by
+`analysis/R/methylation-timing-experiment.R`. The text of the data set
+README to be uploaded with these files is kept in
+`inst/dataverse-README.txt`.
 
 ### Licenses
 

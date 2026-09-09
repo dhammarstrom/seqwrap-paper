@@ -6,12 +6,17 @@
 # renders the manuscript and supplement. If model estimates are not present in
 # analysis/data/derived_data/, functions run_modelN will place reproduced
 # estimates there. Rerunning all model estimates will take > 2 hours.
-# To overwrite previous results, set overwrite_models to TRUE (row 70).
+# To overwrite previous results, set overwrite_models to TRUE (see the
+# switches below).
 #
 # Simulation results are re-run if make_sim is set to TRUE. Running simulation
-# results takes > 24 hours (dependent on number of cores). We recommend
-# downloading simulation results from Dataverse
-# (https://doi.org/10.18710/I7U71O), see the README for instructions.
+# results takes > 24 hours (dependent on number of cores). The methylation
+# case study is re-run if make_meth is set to TRUE, which takes about two days
+# on 16 cores. We recommend downloading both from Dataverse
+# (https://doi.org/10.18710/I7U71O), see the README for instructions. When
+# either switch is FALSE, download_dataverse() fetches the whole data set and
+# places simulation results in analysis/data/raw_data/ and methylation
+# results in analysis/data/derived_data/. Files already on disk are skipped.
 #
 ##############################################################################
 
@@ -44,9 +49,16 @@ source(here::here("analysis/R/simulation-functions.R"))
 # Switches for a full re-run
 #
 # overwrite_models  refit the five real-data (Pillon) models. > 2 hours.
-# make_sim          re-run both simulation scenarios. > 24 hours.
+# make_sim          re-run both simulation scenarios. > 24 hours. When FALSE
+#                   the results are downloaded from Dataverse instead.
 # make_meth         re-run the methylation case study (data prep, permutation
-#                   study, full run). About two days on 16 cores.
+#                   study, full run). About two days on 16 cores. When FALSE
+#                   the results are downloaded from Dataverse instead. Note
+#                   that the timing experiment behind Figure 5 F-G
+#                   (timing_v1/) and the superseded four-arm run timing
+#                   (full_v2/timing.RDS) that the paper quotes are NOT
+#                   reproduced by this script under either setting; they are
+#                   only available from Dataverse (see below).
 #
 # overwrite_models MUST be TRUE when re-running against seqwrap >= 0.8.0 with
 # cached results produced by an earlier version. The seqwrapResults class
@@ -63,6 +75,23 @@ make_meth <- FALSE
 
 # Detect cores
 cores <- parallel::detectCores()
+
+
+# Download precomputed results from Dataverse ---------------------------------
+#
+# The Dataverse data set (https://doi.org/10.18710/I7U71O) holds both the
+# simulation results (placed in analysis/data/raw_data/) and the methylation
+# case-study results (labelled derived_data/... on Dataverse and placed in
+# analysis/data/derived_data/). download_dataverse() skips files that already
+# exist, so this is cheap on a populated checkout.
+#
+# It runs unconditionally: even with make_sim and make_meth both TRUE, the
+# timing experiment (derived_data/timing_v1/) and the superseded four-arm run
+# timing (derived_data/full_v2/timing.RDS) are only available from Dataverse,
+# and Figure 5 F-G and the paper read them. The re-run steps below overwrite
+# whatever else was downloaded.
+
+download_dataverse()
 
 
 # Fit models on the real-world (Pillon) data ---------------------------------
@@ -97,15 +126,19 @@ if (make_sim) {
   source(here::here("analysis/figures/figure-2.R"))
   sim_wrap1(cores = cores, overwrite = TRUE)
   sim_wrap2(cores = cores, overwrite = TRUE)
-} else {
-  download_dataverse()
 }
 
 # Check if simulation results are present
-if (!dir.exists(here::here("analysis/data/raw_data"))) {
+sim_dirs <- here::here(
+  "analysis/data/raw_data",
+  c("estimates", "estimates2", "evaluations", "evaluations2",
+    "simdata", "simdata2")
+)
+if (!all(dir.exists(sim_dirs))) {
   warning(
-    "Simulation results are not present in this repository. ",
-    "Results can be downloaded from Dataverse ",
+    "Simulation results are not present in this repository (missing: ",
+    paste(basename(sim_dirs[!dir.exists(sim_dirs)]), collapse = ", "),
+    "). Results can be downloaded from Dataverse ",
     "(https://doi.org/10.18710/I7U71O). The simulation results are needed ",
     "to reproduce results in the manuscript."
   )
@@ -177,6 +210,46 @@ if (make_meth) {
     status <- system2(rscript, here::here(s))
     if (status != 0) stop(s, " failed with status ", status, call. = FALSE)
   }
+}
+
+# Check that the methylation case-study inputs are present. paper.qmd and
+# figure-5.R read all of these; the array set and metadata unconditionally,
+# the full-run arms and timing files with a stop() rather than a refit. The
+# permutation study is the one piece that is refitted on the fly when its
+# directory is empty (~25 h), so it is checked here as well to make a missing
+# download visible before the render starts.
+der <- here::here("analysis/data/derived_data")
+meth_files <- file.path(
+  der,
+  c(
+    "seaborne-gset-quantile.RDS",
+    "seaborne-metadata.RDS",
+    "full_v3/beta_reml.RDS",
+    "full_v3/m_reml.RDS",
+    "full_v3/timing.RDS",
+    "full_v2/timing.RDS",
+    "timing_v1/timing-cells.RDS",
+    "timing_v1/timing-scaling.RDS"
+  )
+)
+meth_missing <- meth_files[!file.exists(meth_files)]
+n_perm_files <- length(list.files(
+  file.path(der, "permutation_v4"),
+  pattern = "^perm_\\d+\\.RDS$"
+))
+if (length(meth_missing) > 0 || n_perm_files == 0) {
+  warning(
+    "Methylation case-study results are not present in this repository ",
+    "(missing: ",
+    paste(
+      c(basename(meth_missing), if (n_perm_files == 0) "permutation_v4/"),
+      collapse = ", "
+    ),
+    "). They are downloaded from Dataverse (https://doi.org/10.18710/I7U71O) ",
+    "by download_dataverse() above, or reproduced with make_meth <- TRUE ",
+    "(except timing_v1/ and full_v2/timing.RDS, which are Dataverse only). ",
+    "paper.qmd and figure-5.R will fail without them."
+  )
 }
 
 # Source figure files (these are needed for the manuscript and supplement)
